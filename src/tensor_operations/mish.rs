@@ -1,4 +1,4 @@
-use crate::tensors::{Tensor, Tensor0D};
+use crate::tensors::Tensor0D;
 
 impl Tensor0D {
     pub fn mish(t: &mut Self) -> Self {
@@ -29,6 +29,7 @@ impl Tensor0D {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tensors::Tensor;
 
     #[test]
     fn test_mish_0d() {

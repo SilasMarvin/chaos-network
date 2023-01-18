@@ -1,6 +1,6 @@
 mod clone;
 mod new;
-mod tensors;
+mod tensor;
 
 pub use new::TENSOR_COUNT;
-pub use tensors::{Tensor, Tensor0D};
+pub use tensor::{Tensor, Tensor0D};

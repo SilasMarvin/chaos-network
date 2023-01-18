@@ -1,5 +1,5 @@
 use crate::gradients::Tape;
-use crate::tensors::{Tensor, Tensor0D};
+use crate::tensors::Tensor0D;
 
 impl Tensor0D {
     pub fn nll(t: Vec<Self>, index: usize) -> Self {
@@ -36,6 +36,7 @@ impl Tensor0D {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tensors::Tensor;
 
     #[test]
     fn test_relu_0d() {

@@ -1,4 +1,4 @@
-use crate::tensors::{Tensor, Tensor0D};
+use crate::tensors::Tensor0D;
 use std::ops::Mul;
 
 impl<'a, 'b> Mul<&'b mut Tensor0D> for &'a mut Tensor0D {
@@ -57,6 +57,7 @@ impl<'a, 'b> Mul<&'b mut Tensor0D> for &'a mut Tensor0D {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tensors::Tensor;
 
     #[test]
     fn test_mul_0d() {

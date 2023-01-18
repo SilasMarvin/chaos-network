@@ -23,8 +23,6 @@
             {
               nativeBuildInputs = [ pkgs.bashInteractive ];
               buildInputs = with pkgs; [
-                xorg.libX11
-                pkg-config
               ];
             };
         }

@@ -1,4 +1,4 @@
-use crate::tensors::{Tensor, Tensor0D};
+use crate::tensors::Tensor0D;
 
 impl Tensor0D {
     pub fn mse(t: &mut Self, other: &mut Self) -> Self {
@@ -24,6 +24,7 @@ impl Tensor0D {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tensors::Tensor;
 
     #[test]
     fn test_relu_0d() {

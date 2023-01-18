@@ -1,5 +1,5 @@
 [package]
-name = "ad"
+name = "chaos-network"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 rand = "0.8.5"
 rust-mnist = "0.2"
-device_query = "1.1.1"
+termion = "2.0.1"

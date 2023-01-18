@@ -1,4 +1,4 @@
-use crate::tensors::{Tensor, Tensor0D};
+use crate::tensors::Tensor0D;
 use std::ops::Add;
 
 impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
@@ -49,6 +49,7 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tensors::Tensor;
 
     #[test]
     fn test_add_0d() {

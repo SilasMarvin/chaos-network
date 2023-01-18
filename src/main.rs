@@ -1,4 +1,5 @@
 use rust_mnist::Mnist;
+use std::io::{stdout, Write};
 
 mod gradients;
 mod network;
@@ -8,15 +9,15 @@ mod tensors;
 use crate::network::{Network, NetworkMode, NodeKind};
 use crate::tensors::Tensor0D;
 
-const BATCH_SIZE: usize = 32;
-
+const TRAINING_EPOCHS: usize = 50;
+const EXAMPLES_PER_EPOCH: usize = 10000;
 const INPUTS: usize = 784;
 const OUTPUTS: usize = 10;
 const STARTING_NODES: usize = 5000;
 
-fn validate(network: &mut Network, mnist: &Mnist) {
+fn validate(network: &mut Network, mnist: &Mnist) -> f32 {
     let mut correct = 0;
-    for i in 0..1000 {
+    for i in 0..10000 {
         let input: Vec<Tensor0D> = mnist.test_data[i]
             .iter()
             .map(|x| Tensor0D::new_without_tape(*x as f32 / 255.))
@@ -38,35 +39,36 @@ fn validate(network: &mut Network, mnist: &Mnist) {
             correct += 1;
         }
     }
-    println!("VAL PERCENT: {:?}", correct as f32 / 1000 as f32);
+    correct as f32 / 10000f32
+}
+
+fn build_network() -> Network {
+    let mut network = Network::new();
+    for _i in 0..INPUTS {
+        network.add_node(NodeKind::Input);
+    }
+    for _i in 0..OUTPUTS {
+        network.add_node(NodeKind::Leaf);
+    }
+    for _i in 0..STARTING_NODES {
+        network.add_node(NodeKind::Normal);
+    }
+    network
 }
 
 fn main() {
     let mnist = Mnist::new("data/");
 
-    let mut network = Network::new();
-    network.add_node(NodeKind::Input);
-    for _i in 0..OUTPUTS {
-        network.add_node(NodeKind::Leaf);
-    }
-    for _i in 0..INPUTS - 1 {
-        network.add_node(NodeKind::Input);
-    }
-    for _i in 0..STARTING_NODES {
-        network.add_node(NodeKind::Normal);
-    }
-
+    let mut network = build_network();
     println!("{:?}", network);
 
-    println!("Initial test");
+    // Do initial validation
     network.set_mode(NetworkMode::Inference);
     validate(&mut network, &mnist);
     network.set_mode(NetworkMode::Training);
 
-    let mut running_loss = Tensor0D::new_without_tape(0.);
-    for i in 0..1000 {
-        for ii in 0..60000 {
-            network.set_mode(NetworkMode::Training);
+    for i in 0..TRAINING_EPOCHS {
+        for ii in 0..EXAMPLES_PER_EPOCH {
             // Prep data
             let input: Vec<Tensor0D> = mnist.train_data[ii]
                 .iter()
@@ -76,25 +78,37 @@ fn main() {
 
             // Forward pass
             let output = network.forward(input);
-            let mut loss = Tensor0D::nll(output, label);
+            let loss = Tensor0D::nll(output, label);
+            network.backward(loss);
 
-            // Update running loss
-            running_loss = &mut running_loss + &mut loss;
-
-            if ii % BATCH_SIZE == 0 {
-                running_loss =
-                    &mut running_loss * &mut Tensor0D::new_without_tape(1. / BATCH_SIZE as f32);
-                if ii % (BATCH_SIZE * 50) == 0 {
-                    println!("Iteration: {} - loss: {:?}", i, running_loss);
-                    network.morph(1.);
-                    network.grow(1.);
-                }
-                network.backward(running_loss);
-                running_loss = Tensor0D::new_without_tape(0.);
+            // Print some nice things for us
+            if ii % 100 == 0 {
+                let percent_done = ii as f32 / EXAMPLES_PER_EPOCH as f32;
+                let mut progress = "#".repeat((percent_done * 100.) as usize);
+                progress += &" ".repeat(((1. - percent_done) * 100.) as usize);
+                print!(
+                    "{}{}Epoch: {} [{}] {}/{}",
+                    termion::clear::CurrentLine,
+                    termion::cursor::Left(10000),
+                    i,
+                    progress,
+                    ii,
+                    EXAMPLES_PER_EPOCH
+                );
+                stdout().flush().unwrap();
             }
         }
+        // Do end of epoch validation
         network.set_mode(NetworkMode::Inference);
-        validate(&mut network, &mnist);
+        let percent_correct = validate(&mut network, &mnist);
         network.set_mode(NetworkMode::Training);
+        print!(
+            "{}{}Epoch: {} val_percent: {}",
+            termion::clear::CurrentLine,
+            termion::cursor::Left(10000),
+            i,
+            percent_correct
+        );
+        println!();
     }
 }
