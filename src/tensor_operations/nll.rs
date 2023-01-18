@@ -16,13 +16,13 @@ impl Tensor0D {
                 let softmax_value = tensor.data.exp() / sum_e;
                 let sub_one = index == i;
                 new_tape.add_operation(Box::new(move |g| {
-                    let mut tg = g.remove::<Tensor0D>(new_id);
+                    let mut tg = g.remove(new_id);
                     if sub_one {
                         tg.data *= softmax_value - 1.;
                     } else {
                         tg.data *= softmax_value;
                     }
-                    g.insert::<Tensor0D>(self_id, tg);
+                    g.insert(self_id, tg);
                 }));
             }
         }
@@ -51,9 +51,9 @@ mod tests {
         assert_eq!(2.407606, b.data);
         // Check gradients
         let mut grads = b.backward();
-        let a_0_grads = grads.remove::<Tensor0D>(ids[0]);
-        let a_1_grads = grads.remove::<Tensor0D>(ids[1]);
-        let a_2_grads = grads.remove::<Tensor0D>(ids[2]);
+        let a_0_grads = grads.remove(ids[0]);
+        let a_1_grads = grads.remove(ids[1]);
+        let a_2_grads = grads.remove(ids[2]);
         assert_eq!(-0.90996945, a_0_grads.data);
         assert_eq!(0.24472848, a_1_grads.data);
         assert_eq!(0.66524094, a_2_grads.data);

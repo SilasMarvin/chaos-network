@@ -14,10 +14,10 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
                 let self_id = self.id;
                 let other_id = other.id;
                 self_tape.add_operation(Box::new(move |g| {
-                    let tg1 = g.remove::<Tensor0D>(new_id);
+                    let tg1 = g.remove(new_id);
                     let tg2 = tg1.clone();
-                    g.insert::<Tensor0D>(self_id, tg1);
-                    g.insert::<Tensor0D>(other_id, tg2);
+                    g.insert(self_id, tg1);
+                    g.insert(other_id, tg2);
                 }));
                 Some(self_tape)
             }
@@ -25,8 +25,8 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
                 let new_id = new.id;
                 let self_id = self.id;
                 self_tape.add_operation(Box::new(move |g| {
-                    let tg = g.remove::<Tensor0D>(new_id);
-                    g.insert::<Tensor0D>(self_id, tg);
+                    let tg = g.remove(new_id);
+                    g.insert(self_id, tg);
                 }));
                 Some(self_tape)
             }
@@ -34,8 +34,8 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
                 let new_id = new.id;
                 let other_id = other.id;
                 other_tape.add_operation(Box::new(move |g| {
-                    let tg = g.remove::<Tensor0D>(new_id);
-                    g.insert::<Tensor0D>(other_id, tg);
+                    let tg = g.remove(new_id);
+                    g.insert(other_id, tg);
                 }));
                 Some(other_tape)
             }
@@ -60,8 +60,8 @@ mod tests {
         assert_eq!(3., c.data);
         // Check gradients
         let mut grads = c.backward();
-        let a_grads = grads.remove::<Tensor0D>(a.id);
-        let b_grads = grads.remove::<Tensor0D>(b.id);
+        let a_grads = grads.remove(a.id);
+        let b_grads = grads.remove(b.id);
         assert_eq!(1., a_grads.data);
         assert_eq!(1., b_grads.data);
     }

@@ -1,8 +1,8 @@
-use std::any::Any;
 use std::collections::HashMap;
 
-use crate::tensors::Tensor;
+use crate::tensors::{Tensor, Tensor0D};
 
+#[derive(Default)]
 pub struct Tape {
     operations: Vec<Box<dyn FnOnce(&mut Gradients)>>,
 }
@@ -46,30 +46,19 @@ impl Tape {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Gradients {
-    grads: HashMap<i32, Box<dyn Any>>,
+    grads: HashMap<i32, Tensor0D>,
 }
 
 impl Gradients {
-    pub fn default() -> Self {
-        Self {
-            grads: HashMap::new(),
-        }
-    }
-
-    pub fn remove<T: Tensor + 'static>(&mut self, id: i32) -> Box<T> {
-        let it: Box<dyn Any> = self
-            .grads
+    pub fn remove(&mut self, id: i32) -> Tensor0D {
+        self.grads
             .remove(&id)
-            .unwrap_or(Box::new(T::default_without_tape()) as Box<dyn Any>);
-        match it.downcast::<T>() {
-            Ok(i) => i,
-            Err(_e) => panic!("Could not downcast"),
-        }
+            .unwrap_or(Tensor0D::default_without_tape())
     }
 
-    pub fn insert<T: Tensor>(&mut self, key: i32, tensor: Box<dyn Any>) {
+    pub fn insert(&mut self, key: i32, tensor: Tensor0D) {
         self.grads.insert(key, tensor);
     }
 }

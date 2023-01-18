@@ -10,14 +10,14 @@ impl Tensor0D {
             let t_data = t.data;
             let self_id = t.id;
             tape.add_operation(Box::new(move |g| {
-                let mut tg = g.remove::<Tensor0D>(new_id);
+                let mut tg = g.remove(new_id);
                 let w = (4. * (t_data + 1.))
                     + (4. * (2. * t_data).exp())
                     + (3. * t_data).exp()
                     + (t_data.exp() * ((4. * t_data) + 6.));
                 let d = (2. * t_data.exp()) + (2. * t_data).exp() + 2.;
                 tg.data *= (t_data.exp() * w) / d.powi(2);
-                g.insert::<Tensor0D>(self_id, tg);
+                g.insert(self_id, tg);
             }));
             new.tape = Some(tape);
         }
@@ -39,7 +39,7 @@ mod tests {
         assert_eq!(0.86509836, b.data);
         // Check gradients
         let mut grads = b.backward();
-        let a_grads = grads.remove::<Tensor0D>(a.id);
+        let a_grads = grads.remove(a.id);
         assert_eq!(1.0490361, a_grads.data);
     }
 }

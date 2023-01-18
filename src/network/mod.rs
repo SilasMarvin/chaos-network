@@ -29,6 +29,13 @@ pub enum NetworkMode {
     Inference,
 }
 
+impl Default for NetworkMode {
+    fn default() -> Self {
+        Self::Inference
+    }
+}
+
+#[derive(Default)]
 pub struct Network {
     inputs: Vec<Rc<RefCell<Node>>>,
     pub nodes: Vec<Rc<RefCell<Node>>>,
@@ -353,7 +360,7 @@ impl Node {
         }
         visited.insert(self.id, true);
         for w in self.weights.iter_mut() {
-            let w_gradients = gradients.remove::<Tensor0D>(w.id);
+            let w_gradients = gradients.remove(w.id);
             w.data -= 0.0025 * w_gradients.data;
             w.reset_tape();
         }
