@@ -1,4 +1,4 @@
-# chaos-network
+#Chaos Network
 
 Run with
 ```
