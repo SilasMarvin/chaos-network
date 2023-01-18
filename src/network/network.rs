@@ -5,15 +5,16 @@ use rand::{
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt;
 use std::rc::Rc;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
+use std::{borrow, fmt};
 
 use crate::gradients::Gradients;
 use crate::tensors::{Tensor, Tensor0D};
 
 pub static NODE_COUNT: AtomicI32 = AtomicI32::new(0);
+pub static LEAF_COUNT: AtomicI32 = AtomicI32::new(0);
 
 #[derive(Debug, Clone, Copy)]
 pub enum NodeKind {
@@ -43,6 +44,7 @@ pub struct Node {
     running_hits: i32,
     connected_from: i32,
     kind: NodeKind,
+    leaf_id: i32,
 }
 
 impl Network {
@@ -62,7 +64,7 @@ impl Network {
         match kind {
             NodeKind::Normal => {
                 self.add_normal_node_first_connection(node.clone());
-                for _i in 0..3 {
+                for _i in 0..5 {
                     self.connect_node(node.clone());
                 }
             }
@@ -80,6 +82,13 @@ impl Network {
                 }
                 self.connect_node(node);
             }
+        }
+    }
+
+    pub fn remove_node(&mut self, node: Rc<RefCell<Node>>) {
+        let index = self.nodes.iter().position(|n| Rc::ptr_eq(n, &node));
+        if let Some(i) = index {
+            self.nodes.remove(i);
         }
     }
 
@@ -194,7 +203,8 @@ impl Network {
     }
 
     pub fn forward(&mut self, mut input: Vec<Tensor0D>) -> Vec<Tensor0D> {
-        let mut output: Vec<Tensor0D> = Vec::new();
+        let mut output: Vec<Tensor0D> = Vec::with_capacity(self.leaves.len());
+        output.resize(self.leaves.len(), Tensor0D::new_without_tape(0.));
         for (_i, n) in self.inputs.iter().enumerate() {
             (**n).borrow_mut().forward(input.remove(0), &mut output);
         }
@@ -211,30 +221,52 @@ impl Network {
         }
     }
 
-    pub fn prune_weights_below(&mut self, min_weight: f32) {
-        let mut visited = HashMap::new();
-        for n in self.inputs.iter() {
-            (**n)
-                .borrow_mut()
-                .prune_weights_below(min_weight, &mut visited);
-        }
-        let mut adjust_back = 0;
-        for i in 0..self.nodes.len() {
-            if matches!(
-                (*self.nodes[i - adjust_back]).borrow().kind,
-                NodeKind::Normal
-            ) && (*self.nodes[i - adjust_back]).borrow().connections.len() == 0
-            {
-                self.nodes.remove(i - adjust_back);
-                adjust_back += 1;
+    pub fn morph(&mut self, morph_percent: f32) {
+        let connections = self.nodes.iter().fold(Vec::new(), |mut acc, n| {
+            for i in 0..n.borrow().connections.len() {
+                acc.push((
+                    n.clone(),
+                    n.borrow().connections[i].clone(),
+                    n.borrow().weights[i].data,
+                ));
+            }
+            acc
+        });
+        let mut rng = thread_rng();
+        let choice_count = self.nodes.len() as f32 * (morph_percent / 100.);
+        let choices = connections
+            .choose_multiple_weighted(&mut rng, choice_count as usize, |c| c.2.abs())
+            .unwrap();
+        for c in choices {
+            if c.0.borrow().connections.len() == 1 {
+                continue;
+            } else if c.1.borrow().connected_from == 1 {
+                for n in &c.1.borrow().connections {
+                    if !c.0.borrow().is_connected_to(n.clone()) {
+                        (*c.0).borrow_mut().add_connection(n.clone());
+                    }
+                }
+                self.remove_node(c.1.clone());
+            } else {
+                (*c.0).borrow_mut().remove_connection(c.1.clone());
             }
         }
+        self.add_random_connections(choice_count as usize);
+    }
+
+    pub fn grow(&mut self, growth_percent: f32) {
+        let grow_count = self.nodes.len() as f32 * ((growth_percent / 2.) / 100.);
+        println!("Adding nodes and connections: {}", grow_count as usize);
+        for _i in 0..grow_count as usize {
+            self.add_node(NodeKind::Normal);
+        }
+        self.add_random_connections(grow_count as usize);
     }
 
     pub fn set_mode(&mut self, mode: NetworkMode) {
-        if matches!(self.mode, mode) {
-            return;
-        }
+        // if matches!(self.mode, mode) {
+        //     return;
+        // }
         self.mode = mode;
         let mut visited = HashMap::new();
         for n in &self.inputs {
@@ -257,15 +289,28 @@ impl Network {
 
 impl Node {
     pub fn new(kind: NodeKind) -> Self {
-        return Self {
-            id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
-            weights: Vec::new(),
-            connections: Vec::new(),
-            running_value: Tensor0D::new_without_tape(0.),
-            running_hits: 0,
-            kind,
-            connected_from: 0,
-        };
+        match kind {
+            NodeKind::Leaf => Self {
+                id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
+                weights: Vec::new(),
+                connections: Vec::new(),
+                running_value: Tensor0D::new_without_tape(0.),
+                running_hits: 0,
+                kind,
+                connected_from: 0,
+                leaf_id: LEAF_COUNT.fetch_add(1, Ordering::SeqCst),
+            },
+            _ => Self {
+                id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
+                weights: Vec::new(),
+                connections: Vec::new(),
+                running_value: Tensor0D::new_without_tape(0.),
+                running_hits: 0,
+                kind,
+                connected_from: 0,
+                leaf_id: 0,
+            },
+        }
     }
 
     fn forward(&mut self, mut input: Tensor0D, output: &mut Vec<Tensor0D>) {
@@ -282,7 +327,7 @@ impl Node {
         // If we are a leaf, push the value, else call forward on our connections
         match &self.kind {
             NodeKind::Leaf => {
-                output.push(x);
+                output[self.leaf_id as usize] = x;
             }
             _ => {
                 if matches!(self.kind, NodeKind::Normal) {
@@ -304,7 +349,7 @@ impl Node {
         visited.insert(self.id, true);
         for w in self.weights.iter_mut() {
             let w_gradients = gradients.remove::<Tensor0D>(w.id);
-            w.data -= 0.01 * w_gradients.data;
+            w.data -= 0.001 * w_gradients.data;
             w.reset_tape();
         }
         for n in &self.connections {
@@ -333,52 +378,29 @@ impl Node {
         }
     }
 
+    fn is_connected_to(&self, node: Rc<RefCell<Node>>) -> bool {
+        self.connections
+            .iter()
+            .fold(false, |acc, c| acc || c.borrow().id == node.borrow().id)
+    }
+
     fn add_connection(&mut self, new_node: Rc<RefCell<Node>>) {
         let mut rng = rand::thread_rng();
-        let w = rng.gen::<f32>() / 10.;
+        let w = rng.gen::<f32>() / 100.;
         (*new_node).borrow_mut().connected_from += 1;
         self.connections.push(new_node);
         self.weights.push(Tensor0D::new_without_tape(w));
     }
 
-    fn remove_connection(&mut self, connection_index: usize) {
-        (*self.connections[connection_index])
-            .borrow_mut()
-            .connected_from -= 1;
+    fn remove_connection(&mut self, node: Rc<RefCell<Node>>) {
+        (*node).borrow_mut().connected_from -= 1;
+        let connection_index = self
+            .connections
+            .iter()
+            .position(|c| c.borrow().id == node.borrow().id)
+            .unwrap();
         self.weights.remove(connection_index);
         self.connections.remove(connection_index);
-    }
-
-    fn prune_weights_below(&mut self, min_weight: f32, visited: &mut HashMap<i32, bool>) {
-        if *visited.get(&self.id).unwrap_or(&false) {
-            return;
-        }
-        visited.insert(self.id, true);
-        // It is fine if we leave some dangeling nodes, we will remove them later
-        let mut adjust_back = 0;
-        for i in 0..self.connections.len() {
-            let v = self.weights[i - adjust_back].data;
-            if v < min_weight && v > -1. * min_weight {
-                println!("Pruning: {}", v);
-                self.remove_connection(i - adjust_back);
-                adjust_back += 1;
-            }
-        }
-        for n in &self.connections {
-            (**n).borrow_mut().prune_weights_below(min_weight, visited);
-        }
-        let mut adjust_back = 0;
-        for i in 0..self.connections.len() {
-            if (*self.connections[i - adjust_back])
-                .borrow()
-                .connections
-                .len()
-                == 0
-            {
-                self.remove_connection(i - adjust_back);
-                adjust_back += 1;
-            }
-        }
     }
 
     fn set_mode(&mut self, mode: NetworkMode, visited: &mut HashMap<i32, bool>) {
@@ -386,16 +408,19 @@ impl Node {
             return;
         }
         visited.insert(self.id, true);
-        for w in &mut self.weights {
-            match mode {
-                NetworkMode::Training => {
+        match mode {
+            NetworkMode::Training => {
+                for w in &mut self.weights {
                     w.reset_tape();
                 }
-                NetworkMode::Inference => {
+            }
+            NetworkMode::Inference => {
+                for w in &mut self.weights {
                     w.clear_tape();
                 }
             }
         }
+
         for n in &self.connections {
             (**n).borrow_mut().set_mode(mode, visited);
         }
