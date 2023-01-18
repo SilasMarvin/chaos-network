@@ -34,9 +34,7 @@ impl Tape {
     pub fn operation_count(&self) -> usize {
         self.operations.len()
     }
-}
 
-impl Tape {
     pub fn execute(&mut self) -> Gradients {
         let mut gradients: Gradients = Gradients::default();
         for operation in self.operations.drain(..).rev() {

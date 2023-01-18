@@ -39,7 +39,7 @@ fn validate(network: &mut Network, mnist: &Mnist) -> f32 {
             correct += 1;
         }
     }
-    correct as f32 / 10000f32
+    correct as f32 / 10000.
 }
 
 fn build_network() -> Network {
