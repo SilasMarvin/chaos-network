@@ -13,7 +13,7 @@ const TRAINING_EPOCHS: usize = 50;
 const EXAMPLES_PER_EPOCH: usize = 10000;
 const INPUTS: usize = 784;
 const OUTPUTS: usize = 10;
-const STARTING_NODES: usize = 15000;
+const STARTING_NODES: usize = 500;
 
 fn validate(network: &mut Network, mnist: &Mnist) -> f32 {
     let mut correct = 0;
