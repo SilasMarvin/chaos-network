@@ -17,7 +17,7 @@ const STARTING_NODES: usize = 5000;
 
 fn validate(network: &mut Network, mnist: &Mnist) -> f32 {
     let mut correct = 0;
-    for i in 0..10000 {
+    for i in 0..100 {
         let input: Vec<Tensor0D> = mnist.test_data[i]
             .iter()
             .map(|x| Tensor0D::new_without_tape(*x as f32 / 255.))
@@ -64,7 +64,10 @@ fn main() {
 
     // Do initial validation
     network.set_mode(NetworkMode::Inference);
+    let now = std::time::Instant::now();
     validate(&mut network, &mnist);
+    let elapsed_time = now.elapsed();
+    println!("Elapsed: {}", elapsed_time.as_millis());
     network.set_mode(NetworkMode::Training);
 
     for i in 0..TRAINING_EPOCHS {
