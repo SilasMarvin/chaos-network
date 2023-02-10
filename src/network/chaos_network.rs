@@ -447,7 +447,7 @@ impl Node {
         for w in self.weights.iter_mut() {
             let w_gradients = gradients.remove(w.id);
             // Do a little gradient clipping
-            let update = (0.01 * w_gradients.data).clamp(-0.1, 0.1);
+            let update = (0.0025 * w_gradients.data).clamp(-0.2, 0.2);
             w.data -= update;
             w.reset_tape();
         }

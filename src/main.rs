@@ -48,7 +48,9 @@ fn validate(network: &mut Network, mnist: &Mnist) -> f64 {
 }
 
 fn train_epoch(network: &mut Network, mnist: &Mnist) {
+    let mut loss = Tensor0D::new_without_tape(0.);
     for ii in 0..EXAMPLES_PER_EPOCH {
+        network.set_mode(NetworkMode::Training);
         // Prep data
         let input: Vec<Tensor0D> = mnist.train_data[ii]
             .iter()
@@ -58,8 +60,13 @@ fn train_epoch(network: &mut Network, mnist: &Mnist) {
 
         // Forward and backward
         let output = network.forward(input);
-        let loss = Tensor0D::nll(output, label);
-        network.backward(loss);
+        loss = &mut loss + &mut Tensor0D::nll(output, label);
+
+        if ii % 64 == 0 || ii == EXAMPLES_PER_EPOCH - 1 {
+            loss = &mut loss * &mut Tensor0D::new_without_tape(1. / 64.);
+            network.backward(loss);
+            loss = Tensor0D::new_without_tape(0.);
+        }
     }
 }
 
@@ -75,7 +82,6 @@ fn main() {
     println!("{:?}", network);
 
     for i in 0..TRAINING_EPOCHS {
-        // Do end of epoch validation
         let mut handles = Vec::new();
         for _i in 0..WORKERS_COUNT {
             network.set_mode(NetworkMode::Training);
