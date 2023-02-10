@@ -1,5 +1,7 @@
 use rust_mnist::Mnist;
 use std::io::{stdout, Write};
+use std::sync::Arc;
+use std::thread;
 
 mod gradients;
 mod network;
@@ -9,25 +11,28 @@ mod tensors;
 use crate::network::{Network, NetworkMode, NodeKind};
 use crate::tensors::Tensor0D;
 
-const TRAINING_EPOCHS: usize = 50;
-const EXAMPLES_PER_EPOCH: usize = 10000;
+const WORKERS_COUNT: usize = 1;
+
+const TRAINING_EPOCHS: usize = 5000;
+const EXAMPLES_PER_VALIDATION: usize = 1000;
+const EXAMPLES_PER_EPOCH: usize = 1000;
 const INPUTS: usize = 784;
 const OUTPUTS: usize = 10;
-const STARTING_NODES: usize = 500;
+const ADDITIONAL_STARTING_NODES: i32 = 500;
 
-fn validate(network: &mut Network, mnist: &Mnist) -> f32 {
-    let mut correct = 0;
-    for i in 0..100 {
+fn validate(network: &mut Network, mnist: &Mnist) -> f64 {
+    let mut correct = 0.;
+    for i in 0..EXAMPLES_PER_VALIDATION {
         let input: Vec<Tensor0D> = mnist.test_data[i]
             .iter()
-            .map(|x| Tensor0D::new_without_tape(*x as f32 / 255.))
+            .map(|x| Tensor0D::new_without_tape(*x as f64 / 255.))
             .collect();
         let label = mnist.test_labels[i] as usize;
         let output = network.forward(input);
         let guess = output
             .into_iter()
             .enumerate()
-            .fold((0, f32::NEG_INFINITY), |acc, (i, t)| {
+            .fold((0, f64::NEG_INFINITY), |acc, (i, t)| {
                 if t.data > acc.1 {
                     (i, t.data)
                 } else {
@@ -36,82 +41,66 @@ fn validate(network: &mut Network, mnist: &Mnist) -> f32 {
             })
             .0;
         if label == guess {
-            correct += 1;
+            correct += 1.;
         }
     }
-    correct as f32 / 10000.
+    correct / EXAMPLES_PER_VALIDATION as f64
+}
+
+fn train_epoch(network: &mut Network, mnist: &Mnist) {
+    for ii in 0..EXAMPLES_PER_EPOCH {
+        // Prep data
+        let input: Vec<Tensor0D> = mnist.train_data[ii]
+            .iter()
+            .map(|x| Tensor0D::new_without_tape(*x as f64 / 255.))
+            .collect();
+        let label = mnist.train_labels[ii] as usize;
+
+        // Forward and backward
+        let output = network.forward(input);
+        let loss = Tensor0D::nll(output, label);
+        network.backward(loss);
+    }
 }
 
 fn build_network() -> Network {
-    let mut network = Network::new();
-    for _i in 0..INPUTS {
-        network.add_node(NodeKind::Input);
-    }
-    for _i in 0..OUTPUTS {
-        network.add_node(NodeKind::Leaf);
-    }
-    for _i in 0..STARTING_NODES {
-        network.add_node(NodeKind::Normal);
-    }
+    let network = Network::new(INPUTS, 512, OUTPUTS);
     network
 }
 
 fn main() {
-    let mnist = Mnist::new("data/");
+    let mnist = Arc::new(Mnist::new("data/"));
 
     let mut network = build_network();
     println!("{:?}", network);
 
-    // Do initial validation
-    network.set_mode(NetworkMode::Inference);
-    let now = std::time::Instant::now();
-    // validate(&mut network, &mnist);
-    for i in 0..10000 {
-        let input: Vec<Tensor0D> = mnist.test_data[i]
-            .iter()
-            .map(|x| Tensor0D::new_without_tape(*x as f32 / 255.))
-            .collect();
-        network.forward(input);
-    }
-    let elapsed_time = now.elapsed();
-    println!("Elapsed: {}", elapsed_time.as_millis());
-    network.set_mode(NetworkMode::Training);
-
     for i in 0..TRAINING_EPOCHS {
-        for ii in 0..EXAMPLES_PER_EPOCH {
-            // Prep data
-            let input: Vec<Tensor0D> = mnist.train_data[ii]
-                .iter()
-                .map(|x| Tensor0D::new_without_tape(*x as f32 / 255.))
-                .collect();
-            let label = mnist.train_labels[ii] as usize;
-
-            // Forward pass
-            let output = network.forward(input);
-            let loss = Tensor0D::nll(output, label);
-            network.backward(loss);
-
-            // Print some nice things for us
-            if ii % 100 == 0 {
-                let percent_done = ii as f32 / EXAMPLES_PER_EPOCH as f32;
-                let mut progress = "#".repeat((percent_done * 100.) as usize);
-                progress += &" ".repeat(((1. - percent_done) * 100.) as usize);
-                print!(
-                    "{}{}Epoch: {} [{}] {}/{}",
-                    termion::clear::CurrentLine,
-                    termion::cursor::Left(10000),
-                    i,
-                    progress,
-                    ii,
-                    EXAMPLES_PER_EPOCH
-                );
-                stdout().flush().unwrap();
-            }
-        }
         // Do end of epoch validation
-        network.set_mode(NetworkMode::Inference);
-        let percent_correct = validate(&mut network, &mnist);
-        network.set_mode(NetworkMode::Training);
+        let mut handles = Vec::new();
+        for _i in 0..WORKERS_COUNT {
+            network.set_mode(NetworkMode::Training);
+            let mut new_network = network.clone();
+            let local_mnist = mnist.clone();
+            let handle = thread::spawn(move || {
+                // new_network.morph();
+                println!("Training");
+                train_epoch(&mut new_network, &local_mnist);
+                new_network.set_mode(NetworkMode::Inference);
+                let percent_correct = validate(&mut new_network, &local_mnist);
+                (percent_correct, new_network)
+            });
+            handles.push(handle);
+        }
+
+        let (percent_correct, new_network) = handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .inspect(|h| println!("{:?}", h.0))
+            .max_by(|x, y| x.0.total_cmp(&y.0))
+            .unwrap();
+        network = new_network;
+
+        // Print some nice things for us
         print!(
             "{}{}Epoch: {} val_percent: {}",
             termion::clear::CurrentLine,
@@ -120,5 +109,57 @@ fn main() {
             percent_correct
         );
         println!();
+        println!("{:?}", network);
+        println!();
     }
+
+    // for i in 0..TRAINING_EPOCHS {
+    //     for ii in 0..EXAMPLES_PER_EPOCH {
+    //         // Prep data
+    //         let input: Vec<Tensor0D> = mnist.train_data[ii]
+    //             .iter()
+    //             .map(|x| Tensor0D::new_without_tape(*x as f64 / 255.))
+    //             .collect();
+    //         let label = mnist.train_labels[ii] as usize;
+    //
+    //         // Forward and backward
+    //         let output = network.forward(input);
+    //         let loss = Tensor0D::nll(output, label);
+    //         network.backward(loss);
+    //
+    //         // Print some nice things for us
+    //         if ii % 100 == 0 {
+    //             let percent_done = ii as f64 / EXAMPLES_PER_EPOCH as f64;
+    //             let mut progress = "#".repeat((percent_done * 100.) as usize);
+    //             progress += &" ".repeat(((1. - percent_done) * 100.) as usize);
+    //             print!(
+    //                 "{}{}Epoch: {} [{}] {}/{}",
+    //                 termion::clear::CurrentLine,
+    //                 termion::cursor::Left(10000),
+    //                 i,
+    //                 progress,
+    //                 ii,
+    //                 EXAMPLES_PER_EPOCH
+    //             );
+    //             stdout().flush().unwrap();
+    //         };
+    //     }
+    //     // Do end of epoch validation
+    //     network.set_mode(NetworkMode::Inference);
+    //     let percent_correct = validate(&mut network, &mnist);
+    //     network.morph();
+    //     network.set_mode(NetworkMode::Training);
+    //
+    //     // Print some nice things for us
+    //     print!(
+    //         "{}{}Epoch: {} val_percent: {}",
+    //         termion::clear::CurrentLine,
+    //         termion::cursor::Left(10000),
+    //         i,
+    //         percent_correct
+    //     );
+    //     println!();
+    //     println!("{:?}", network);
+    //     println!();
+    // }
 }

@@ -7,18 +7,18 @@ pub trait Tensor {
     fn clear_tape(&mut self);
     // fn add(self, other: Self) -> Self;
     // fn sub(self, other: Self) -> Self;
-    // // fn add_scalar(self, other: f32) -> Self;
-    // fn sub_scalar(self, other: f32) -> Self;
+    // // fn add_scalar(self, other: f64) -> Self;
+    // fn sub_scalar(self, other: f64) -> Self;
     // fn mul(self, other: Self) -> Self;
-    // fn mul_scalar(self, other: f32) -> Self;
+    // fn mul_scalar(self, other: f64) -> Self;
     // fn square(self) -> Self;
     // fn dot(self, other: Self) -> Tensor0D;
 }
 
 #[derive(Debug)]
 pub struct Tensor0D {
-    pub id: i32,
-    pub data: f32,
+    pub id: u64,
+    pub data: f64,
     pub tape: Option<Tape>,
 }
 
