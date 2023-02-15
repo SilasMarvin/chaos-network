@@ -23,6 +23,7 @@
             {
               nativeBuildInputs = [ pkgs.bashInteractive ];
               buildInputs = with pkgs; [
+                cargo-flamegraph
               ];
             };
         }

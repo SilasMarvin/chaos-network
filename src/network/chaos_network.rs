@@ -376,10 +376,16 @@ impl Network {
         }
     }
 
-    pub fn backward(&mut self, mut loss: Tensor0D) {
-        let mut gradients = loss.backward();
+    // pub fn backward(&mut self, mut loss: Tensor0D) {
+    //     let mut gradients = loss.backward();
+    //     for n in self.nodes.iter_mut() {
+    //         n.apply_gradients(&mut gradients);
+    //     }
+    // }
+
+    pub fn apply_gradients(&mut self, mut gradients: Gradients, scale: f64) {
         for n in self.nodes.iter_mut() {
-            n.apply_gradients(&mut gradients);
+            n.apply_gradients(&mut gradients, scale);
         }
     }
 
@@ -443,11 +449,11 @@ impl Node {
         self.weights.push(Tensor0D::new_without_tape(w));
     }
 
-    fn apply_gradients(&mut self, gradients: &mut Gradients) {
+    fn apply_gradients(&mut self, gradients: &mut Gradients, scale: f64) {
         for w in self.weights.iter_mut() {
             let w_gradients = gradients.remove(w.id);
             // Do a little gradient clipping
-            let update = (0.0025 * w_gradients.data).clamp(-0.2, 0.2);
+            let update = (0.0025 * w_gradients.data * scale).clamp(-0.2, 0.2);
             w.data -= update;
             w.reset_tape();
         }

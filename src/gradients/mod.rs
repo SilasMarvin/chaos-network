@@ -7,9 +7,12 @@ use crate::tensors::{Tensor, Tensor0D};
 
 const WORKERS: usize = 32;
 
+type Operation = (u64, Box<dyn FnOnce(&mut Gradients) + Send + Sync>);
+
 #[derive(Default)]
 pub struct Tape {
-    operations: Vec<(u64, Box<dyn FnOnce(&mut Gradients) + Send + Sync>)>,
+    operations: Vec<Operation>,
+    joined_operations: Vec<Vec<Operation>>,
 }
 
 impl std::fmt::Debug for Tape {
@@ -24,6 +27,7 @@ impl Tape {
     pub fn new() -> Self {
         Self {
             operations: Vec::new(),
+            joined_operations: Vec::new(),
         }
     }
 
@@ -37,6 +41,11 @@ impl Tape {
     pub fn merge(&mut self, mut other: Self) {
         other.operations.append(&mut self.operations);
         self.operations = other.operations;
+        // self.joined_operations.push(other.operations);
+        // other
+        //     .joined_operations
+        //     .into_iter()
+        //     .for_each(|x| self.joined_operations.push(x));
     }
 
     pub fn operation_count(&self) -> usize {
@@ -45,6 +54,10 @@ impl Tape {
 
     pub fn execute(&mut self) -> Gradients {
         let mut gradients: Gradients = Gradients::default();
+        // let joined_operations = std::mem::replace(&mut self.joined_operations, Vec::new());
+        // let mut joined_operations: Vec<Operation> =
+        //     joined_operations.into_iter().flatten().collect();
+        // self.operations.append(&mut joined_operations);
         self.operations.sort_by(|a, b| a.0.cmp(&b.0));
         // println!("Operations: {:?}", self.operations);
         for operation in self.operations.drain(..).rev() {
@@ -74,6 +87,15 @@ impl Gradients {
 
     pub fn insert(&mut self, key: u64, tensor: Tensor0D) {
         self.grads.insert(key, tensor);
+    }
+
+    pub fn merge_add(&mut self, grads: Self) {
+        for (key, value) in grads.grads.into_iter() {
+            match self.grads.get_mut(&key) {
+                Some(mut g) => g.data += value.data,
+                None => panic!("Cannot merge grads that do not have the same values"),
+            }
+        }
     }
 }
 

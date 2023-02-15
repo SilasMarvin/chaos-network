@@ -8,8 +8,9 @@ mod network;
 mod tensor_operations;
 mod tensors;
 
+use crate::gradients::Gradients;
 use crate::network::{Network, NetworkMode, NodeKind};
-use crate::tensors::Tensor0D;
+use crate::tensors::{Tensor, Tensor0D};
 
 const WORKERS_COUNT: usize = 1;
 
@@ -48,9 +49,11 @@ fn validate(network: &mut Network, mnist: &Mnist) -> f64 {
 }
 
 fn train_epoch(network: &mut Network, mnist: &Mnist) {
-    let mut loss = Tensor0D::new_without_tape(0.);
+    let mut merged_grads: Option<Gradients> = None;
     for ii in 0..EXAMPLES_PER_EPOCH {
+        // Reset tapes
         network.set_mode(NetworkMode::Training);
+
         // Prep data
         let input: Vec<Tensor0D> = mnist.train_data[ii]
             .iter()
@@ -60,12 +63,17 @@ fn train_epoch(network: &mut Network, mnist: &Mnist) {
 
         // Forward and backward
         let output = network.forward(input);
-        loss = &mut loss + &mut Tensor0D::nll(output, label);
+        let loss = &mut Tensor0D::nll(output, label);
+        let grads = loss.backward();
+        match &mut merged_grads {
+            Some(mm) => mm.merge_add(grads),
+            None => merged_grads = Some(grads),
+        }
 
-        if ii % 64 == 0 || ii == EXAMPLES_PER_EPOCH - 1 {
-            loss = &mut loss * &mut Tensor0D::new_without_tape(1. / 64.);
-            network.backward(loss);
-            loss = Tensor0D::new_without_tape(0.);
+        // Apply merged grads
+        if ii % 64 == 0 {
+            network.apply_gradients(merged_grads.unwrap(), 0.016);
+            merged_grads = None;
         }
     }
 }
