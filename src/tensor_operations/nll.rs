@@ -1,4 +1,3 @@
-use crate::gradients::Tape;
 use crate::tensors::Tensor0D;
 
 impl Tensor0D {
@@ -7,15 +6,15 @@ impl Tensor0D {
         let log_softmax: Vec<f64> = t.iter().map(|t| (t.data.exp() / sum_e).ln()).collect();
         let loss = -1. * log_softmax[index];
         let mut new = Tensor0D::new_without_tape(loss);
-        let mut new_tape = Tape::new();
+        // let mut new_tape = Tape::new();
         for (i, mut tensor) in t.into_iter().enumerate() {
             if let Some(tape) = tensor.tape.take() {
-                new_tape.merge(tape);
+                // new_tape.merge(tape);
                 let new_id = new.id;
                 let self_id = tensor.id;
                 let softmax_value = tensor.data.exp() / sum_e;
                 let sub_one = index == i;
-                new_tape.add_operation((
+                tape.borrow_mut().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let mut tg = g.remove(new_id);
@@ -27,38 +26,45 @@ impl Tensor0D {
                         g.insert(self_id, tg);
                     }),
                 ));
+                if matches!(new.tape, None) {
+                    new.tape = Some(tape);
+                }
             }
         }
-        if new_tape.operation_count() > 0 {
-            new.tape = Some(new_tape);
-        }
+        // if new_tape.operation_count() > 0 {
+        //     new.tape = Some(Rc::new(new_tape));
+        // }
         new
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::tensors::Tensor;
-//
-//     #[test]
-//     fn test_nll_0d() {
-//         let a = vec![
-//             Tensor0D::new_with_tape(1.),
-//             Tensor0D::new_with_tape(2.),
-//             Tensor0D::new_with_tape(3.),
-//         ];
-//         let ids = [a[0].id, a[1].id, a[2].id];
-//         let mut b = Tensor0D::nll(a, 0);
-//         // Check value match
-//         assert_eq!(2.407606, b.data);
-//         // Check gradients
-//         let mut grads = b.backward();
-//         let a_0_grads = grads.remove(ids[0]);
-//         let a_1_grads = grads.remove(ids[1]);
-//         let a_2_grads = grads.remove(ids[2]);
-//         assert_eq!(-0.90996945, a_0_grads.data);
-//         assert_eq!(0.24472848, a_1_grads.data);
-//         assert_eq!(0.66524094, a_2_grads.data);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gradients::Tape;
+    use crate::tensors::Tensor;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[test]
+    fn test_nll_0d() {
+        let tape = Some(Rc::new(RefCell::new(Tape::new())));
+        let a = vec![
+            Tensor0D::new_with_tape(1., tape.clone()),
+            Tensor0D::new_with_tape(2., tape.clone()),
+            Tensor0D::new_with_tape(3., tape.clone()),
+        ];
+        let ids = [a[0].id, a[1].id, a[2].id];
+        let mut b = Tensor0D::nll(a, 0);
+        // Check value match
+        assert_eq!(2.40760596444438, b.data);
+        // Check gradients
+        let mut grads = b.backward();
+        let a_0_grads = grads.remove(ids[0]);
+        let a_1_grads = grads.remove(ids[1]);
+        let a_2_grads = grads.remove(ids[2]);
+        assert_eq!(-0.9099694268296196, a_0_grads.data);
+        assert_eq!(0.24472847105479767, a_1_grads.data);
+        assert_eq!(0.6652409557748219, a_2_grads.data);
+    }
+}

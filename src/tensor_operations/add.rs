@@ -9,11 +9,11 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
 
         new.tape = match (self.tape.take(), other.tape.take()) {
             (Some(mut self_tape), Some(other_tape)) => {
-                self_tape.merge(other_tape);
+                // self_tape.merge(other_tape);
                 let new_id = new.id;
                 let self_id = self.id;
                 let other_id = other.id;
-                self_tape.add_operation((
+                self_tape.borrow_mut().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let tg1 = g.remove(new_id);
@@ -27,7 +27,7 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
             (Some(mut self_tape), None) => {
                 let new_id = new.id;
                 let self_id = self.id;
-                self_tape.add_operation((
+                self_tape.borrow_mut().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let tg = g.remove(new_id);
@@ -39,7 +39,7 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
             (None, Some(mut other_tape)) => {
                 let new_id = new.id;
                 let other_id = other.id;
-                other_tape.add_operation((
+                other_tape.borrow_mut().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let tg = g.remove(new_id);

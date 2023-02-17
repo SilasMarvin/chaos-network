@@ -2,12 +2,15 @@ use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 use rand::Rng;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
 
 use crate::gradients::Gradients;
+use crate::gradients::Tape;
 use crate::tensors::{Tensor, Tensor0D};
 
 pub static NODE_COUNT: AtomicI32 = AtomicI32::new(0);
@@ -20,7 +23,7 @@ pub enum NodeKind {
     Leaf,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkMode {
     Training,
     Inference,
@@ -39,6 +42,7 @@ pub struct Network {
     pub nodes: Vec<Node>,
     connections_to: HashMap<i32, Vec<usize>>,
     mode: NetworkMode,
+    tape: Rc<RefCell<Tape>>,
 }
 
 #[derive(Clone)]
@@ -60,6 +64,7 @@ impl Network {
             nodes: Vec::new(),
             connections_to: HashMap::new(),
             mode: NetworkMode::Inference,
+            tape: Rc::new(RefCell::new(Tape::new())),
         };
 
         let mut nodes: Vec<Node> = (0..inputs_count)
@@ -97,79 +102,79 @@ impl Network {
         new_network
     }
 
-    pub fn add_nodes(&mut self, kind: NodeKind, count: i32) {
-        match kind {
-            NodeKind::Normal => {
-                let node_index = self.batch_insert_normal_nodes(count as usize);
-                for i in 0..(count as usize) {
-                    self.add_normal_node_first_connection(node_index + i);
-                }
-                for i in 0..(count as usize) {
-                    for _ii in 0..350 {
-                        self.add_node_connection(node_index + i);
-                    }
-                }
-            }
-            NodeKind::Input => {
-                self.inputs_count += count;
-                let mut nodes: Vec<Node> = (0..count).map(|_i| Node::new(kind)).collect();
-                let ids: Vec<i32> = nodes.iter().map(|n| n.id).collect();
-                for _i in 0..count {
-                    self.nodes.insert(0, nodes.remove(0));
-                }
-                self.shift_all_connections_after(0, count as usize);
-                if self.leaves_count == 0 {
-                    return;
-                }
-                for id in ids {
-                    let mut new_connections: Vec<usize> = Vec::new();
-                    for i in 0..self.leaves_count {
-                        let index = (self.nodes.len() as i32 - i) as usize;
-                        self.nodes[index].add_weight();
-                        new_connections.push(index);
-                    }
-                    self.connections_to.insert(id, new_connections);
-                }
-            }
-            NodeKind::Leaf => {
-                self.leaves_count += count;
-                for _i in 0..count {
-                    self.nodes.push(Node::new(kind));
-                }
-                for i in 0..(self.inputs_count as usize) {
-                    for ii in 0..(self.leaves_count as usize) {
-                        self.add_connection_between(i, self.nodes.len() - ii - 1);
-                    }
-                }
-            } // NodeKind::Leaf => {
-              //     self.leaves_count += count;
-              //     for _i in 0..count {
-              //         self.nodes.push(Node::new(kind));
-              //     }
-              //     let mut inserted_node_index =
-              //         self.batch_insert_normal_nodes((count * self.inputs_count) as usize);
-              //     for i in 0..(self.inputs_count as usize) {
-              //         // let node_id = self.nodes[i].id;
-              //         // let mut new_connections = Vec::new();
-              //         for ii in 0..(self.leaves_count as usize) {
-              //             // new_connections.push(self.nodes.len() - ii - 1);
-              //             // self.nodes[i].add_weight();
-              //             self.add_node_connection_between(
-              //                 inserted_node_index,
-              //                 i,
-              //                 self.nodes.len() - ii - 1,
-              //             );
-              //             inserted_node_index += 1;
-              //         }
-              //         // if let Some(connections) = self.connections_to.get_mut(&node_id) {
-              //         //     connections.append(&mut new_connections);
-              //         // } else {
-              //         //     self.connections_to.insert(node_id, new_connections);
-              //         // }
-              //     }
-              // }
-        }
-    }
+    // pub fn add_nodes(&mut self, kind: NodeKind, count: i32) {
+    //     match kind {
+    //         NodeKind::Normal => {
+    //             let node_index = self.batch_insert_normal_nodes(count as usize);
+    //             for i in 0..(count as usize) {
+    //                 self.add_normal_node_first_connection(node_index + i);
+    //             }
+    //             for i in 0..(count as usize) {
+    //                 for _ii in 0..350 {
+    //                     self.add_node_connection(node_index + i);
+    //                 }
+    //             }
+    //         }
+    //         NodeKind::Input => {
+    //             self.inputs_count += count;
+    //             let mut nodes: Vec<Node> = (0..count).map(|_i| Node::new(kind)).collect();
+    //             let ids: Vec<i32> = nodes.iter().map(|n| n.id).collect();
+    //             for _i in 0..count {
+    //                 self.nodes.insert(0, nodes.remove(0));
+    //             }
+    //             self.shift_all_connections_after(0, count as usize);
+    //             if self.leaves_count == 0 {
+    //                 return;
+    //             }
+    //             for id in ids {
+    //                 let mut new_connections: Vec<usize> = Vec::new();
+    //                 for i in 0..self.leaves_count {
+    //                     let index = (self.nodes.len() as i32 - i) as usize;
+    //                     self.nodes[index].add_weight();
+    //                     new_connections.push(index);
+    //                 }
+    //                 self.connections_to.insert(id, new_connections);
+    //             }
+    //         }
+    //         NodeKind::Leaf => {
+    //             self.leaves_count += count;
+    //             for _i in 0..count {
+    //                 self.nodes.push(Node::new(kind));
+    //             }
+    //             for i in 0..(self.inputs_count as usize) {
+    //                 for ii in 0..(self.leaves_count as usize) {
+    //                     self.add_connection_between(i, self.nodes.len() - ii - 1);
+    //                 }
+    //             }
+    //         } // NodeKind::Leaf => {
+    //           //     self.leaves_count += count;
+    //           //     for _i in 0..count {
+    //           //         self.nodes.push(Node::new(kind));
+    //           //     }
+    //           //     let mut inserted_node_index =
+    //           //         self.batch_insert_normal_nodes((count * self.inputs_count) as usize);
+    //           //     for i in 0..(self.inputs_count as usize) {
+    //           //         // let node_id = self.nodes[i].id;
+    //           //         // let mut new_connections = Vec::new();
+    //           //         for ii in 0..(self.leaves_count as usize) {
+    //           //             // new_connections.push(self.nodes.len() - ii - 1);
+    //           //             // self.nodes[i].add_weight();
+    //           //             self.add_node_connection_between(
+    //           //                 inserted_node_index,
+    //           //                 i,
+    //           //                 self.nodes.len() - ii - 1,
+    //           //             );
+    //           //             inserted_node_index += 1;
+    //           //         }
+    //           //         // if let Some(connections) = self.connections_to.get_mut(&node_id) {
+    //           //         //     connections.append(&mut new_connections);
+    //           //         // } else {
+    //           //         //     self.connections_to.insert(node_id, new_connections);
+    //           //         // }
+    //           //     }
+    //           // }
+    //     }
+    // }
 
     fn batch_insert_normal_nodes(&mut self, count: usize) -> usize {
         let node_index = if self.nodes.len() as i32 - self.inputs_count - self.leaves_count > 0 {
@@ -392,7 +397,11 @@ impl Network {
     pub fn set_mode(&mut self, mode: NetworkMode) {
         self.mode = mode;
         for n in self.nodes.iter_mut() {
-            n.set_mode(mode);
+            if mode == NetworkMode::Training {
+                n.set_mode(mode, Some(self.tape.clone()));
+            } else {
+                n.set_mode(mode, None);
+            }
         }
     }
 
@@ -455,15 +464,15 @@ impl Node {
             // Do a little gradient clipping
             let update = (0.0025 * w_gradients.data * scale).clamp(-0.2, 0.2);
             w.data -= update;
-            w.reset_tape();
+            // w.reset_tape();
         }
     }
 
-    fn set_mode(&mut self, mode: NetworkMode) {
+    fn set_mode(&mut self, mode: NetworkMode, tape: Option<Rc<RefCell<Tape>>>) {
         match mode {
             NetworkMode::Training => {
                 for w in self.weights.iter_mut() {
-                    w.reset_tape();
+                    w.set_tape(tape.clone());
                 }
             }
             NetworkMode::Inference => {

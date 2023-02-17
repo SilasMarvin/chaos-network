@@ -5,15 +5,15 @@ impl Tensor0D {
         match self.tape.take() {
             Some(tape) => {
                 let mut new_tensors: Vec<Tensor0D> = (0..count)
-                    .map(|_i| Tensor0D::new_with_tape(self.data))
+                    .map(|_i| Tensor0D::new_with_tape(self.data, Some(tape.clone())))
                     .collect();
-                new_tensors[0].tape.as_mut().unwrap().merge(tape);
+                // new_tensors[0].tape.as_mut().unwrap().merge(tape);
                 for t in new_tensors.iter_mut() {
                     let self_id = t.id;
                     let old_self_id = self.id;
                     // For each split elment grab their gradients, and the parent gradients, and
                     // add them together
-                    t.tape.as_mut().unwrap().add_operation((
+                    t.tape.as_mut().unwrap().borrow_mut().add_operation((
                         self_id,
                         Box::new(move |g| {
                             let tg = g.remove(self_id);

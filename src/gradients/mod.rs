@@ -12,7 +12,6 @@ type Operation = (u64, Box<dyn FnOnce(&mut Gradients) + Send + Sync>);
 #[derive(Default)]
 pub struct Tape {
     operations: Vec<Operation>,
-    joined_operations: Vec<Vec<Operation>>,
 }
 
 impl std::fmt::Debug for Tape {
@@ -27,7 +26,6 @@ impl Tape {
     pub fn new() -> Self {
         Self {
             operations: Vec::new(),
-            joined_operations: Vec::new(),
         }
     }
 

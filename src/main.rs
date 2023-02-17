@@ -71,10 +71,11 @@ fn train_epoch(network: &mut Network, mnist: &Mnist) {
         }
 
         // Apply merged grads
-        if ii % 64 == 0 {
-            network.apply_gradients(merged_grads.unwrap(), 0.016);
+        if ii % 8 == 0 {
+            network.apply_gradients(merged_grads.unwrap(), 0.16);
             merged_grads = None;
         }
+        println!("Forward: {}", ii);
     }
 }
 
@@ -90,29 +91,34 @@ fn main() {
     println!("{:?}", network);
 
     for i in 0..TRAINING_EPOCHS {
-        let mut handles = Vec::new();
-        for _i in 0..WORKERS_COUNT {
-            network.set_mode(NetworkMode::Training);
-            let mut new_network = network.clone();
-            let local_mnist = mnist.clone();
-            let handle = thread::spawn(move || {
-                // new_network.morph();
-                println!("Training");
-                train_epoch(&mut new_network, &local_mnist);
-                new_network.set_mode(NetworkMode::Inference);
-                let percent_correct = validate(&mut new_network, &local_mnist);
-                (percent_correct, new_network)
-            });
-            handles.push(handle);
-        }
+        // let mut handles = Vec::new();
+        // for _i in 0..WORKERS_COUNT {
+        //     network.set_mode(NetworkMode::Training);
+        //     let mut new_network = network.clone();
+        //     let local_mnist = mnist.clone();
+        //     let handle = thread::spawn(move || {
+        //         // new_network.morph();
+        //         println!("Training");
+        //         train_epoch(&mut new_network, &local_mnist);
+        //         new_network.set_mode(NetworkMode::Inference);
+        //         let percent_correct = validate(&mut new_network, &local_mnist);
+        //         (percent_correct, new_network)
+        //     });
+        //     handles.push(handle);
+        // }
+        //
+        // let (percent_correct, new_network) = handles
+        //     .into_iter()
+        //     .map(|h| h.join().unwrap())
+        //     .inspect(|h| println!("{:?}", h.0))
+        //     .max_by(|x, y| x.0.total_cmp(&y.0))
+        //     .unwrap();
+        // network = new_network;
 
-        let (percent_correct, new_network) = handles
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .inspect(|h| println!("{:?}", h.0))
-            .max_by(|x, y| x.0.total_cmp(&y.0))
-            .unwrap();
-        network = new_network;
+        network.set_mode(NetworkMode::Training);
+        train_epoch(&mut network, &mnist);
+        network.set_mode(NetworkMode::Inference);
+        let percent_correct = validate(&mut network, &mnist);
 
         // Print some nice things for us
         print!(

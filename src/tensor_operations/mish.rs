@@ -9,7 +9,7 @@ impl Tensor0D {
             let new_id = new.id;
             let t_data = t.data;
             let self_id = t.id;
-            tape.add_operation((
+            tape.borrow_mut().add_operation((
                 new_id,
                 Box::new(move |g| {
                     let mut tg = g.remove(new_id);

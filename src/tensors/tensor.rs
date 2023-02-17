@@ -1,9 +1,12 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::gradients::{Gradients, Tape};
 
 pub trait Tensor {
     fn default_without_tape() -> Self;
     fn backward(&mut self) -> Gradients;
-    fn reset_tape(&mut self);
+    fn set_tape(&mut self, tape: Option<Rc<RefCell<Tape>>>);
     fn clear_tape(&mut self);
     // fn add(self, other: Self) -> Self;
     // fn sub(self, other: Self) -> Self;
@@ -19,7 +22,7 @@ pub trait Tensor {
 pub struct Tensor0D {
     pub id: u64,
     pub data: f64,
-    pub tape: Option<Tape>,
+    pub tape: Option<Rc<RefCell<Tape>>>,
 }
 
 impl Tensor for Tensor0D {
@@ -29,13 +32,13 @@ impl Tensor for Tensor0D {
 
     fn backward(&mut self) -> Gradients {
         match &mut self.tape.take() {
-            Some(tape) => tape.execute(),
+            Some(tape) => tape.borrow_mut().execute(),
             None => Gradients::default(),
         }
     }
 
-    fn reset_tape(&mut self) {
-        self.tape = Some(Tape::new());
+    fn set_tape(&mut self, tape: Option<Rc<RefCell<Tape>>>) {
+        self.tape = tape;
     }
 
     fn clear_tape(&mut self) {
