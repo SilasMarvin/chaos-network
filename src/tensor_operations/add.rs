@@ -9,7 +9,6 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
 
         new.tape = match (self.tape.take(), other.tape.take()) {
             (Some(mut self_tape), Some(other_tape)) => {
-                // self_tape.merge(other_tape);
                 let new_id = new.id;
                 let self_id = self.id;
                 let other_id = other.id;

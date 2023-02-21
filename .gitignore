@@ -2,4 +2,4 @@
 /Cargo.lock
 /data
 flamegraph*
-perf.data
+perf.*

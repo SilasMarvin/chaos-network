@@ -5,8 +5,13 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# For flamegraph
+# [profile.release]
+# debug = true
+
 [dependencies]
 rand = "0.8.5"
 rust-mnist = "0.2"
 termion = "2.0.1"
 fasthash = "0.4.0"
+rustc-hash = "1.1.0"

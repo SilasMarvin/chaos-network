@@ -1,3 +1,5 @@
+use rand::prelude::*;
+use rand::seq::SliceRandom;
 use rust_mnist::Mnist;
 use std::io::{stdout, Write};
 use std::sync::Arc;
@@ -16,7 +18,7 @@ const WORKERS_COUNT: usize = 1;
 
 const TRAINING_EPOCHS: usize = 5000;
 const EXAMPLES_PER_VALIDATION: usize = 1000;
-const EXAMPLES_PER_EPOCH: usize = 1000;
+const EXAMPLES_PER_EPOCH: usize = 20000;
 const INPUTS: usize = 784;
 const OUTPUTS: usize = 10;
 const ADDITIONAL_STARTING_NODES: i32 = 500;
@@ -71,11 +73,10 @@ fn train_epoch(network: &mut Network, mnist: &Mnist) {
         }
 
         // Apply merged grads
-        if ii % 8 == 0 {
-            network.apply_gradients(merged_grads.unwrap(), 0.16);
+        if ii % 32 == 0 {
+            network.apply_gradients(merged_grads.unwrap(), 1.0);
             merged_grads = None;
         }
-        println!("Forward: {}", ii);
     }
 }
 
@@ -85,12 +86,14 @@ fn build_network() -> Network {
 }
 
 fn main() {
-    let mnist = Arc::new(Mnist::new("data/"));
+    let mut mnist = Mnist::new("data/");
+    let mut rng = rand::thread_rng();
 
     let mut network = build_network();
     println!("{:?}", network);
 
     for i in 0..TRAINING_EPOCHS {
+        // mnist.train_data.shuffle(&mut rng);
         // let mut handles = Vec::new();
         // for _i in 0..WORKERS_COUNT {
         //     network.set_mode(NetworkMode::Training);
