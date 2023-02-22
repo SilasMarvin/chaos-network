@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 
 use crate::gradients::Gradients;
 use crate::gradients::Tape;
-use crate::tensors::{Tensor, Tensor0D};
+use crate::tensors::{Tensor, Tensor0D, Tensor1D};
 
 pub static NODE_COUNT: AtomicI32 = AtomicI32::new(0);
 pub static LEAF_COUNT: AtomicI32 = AtomicI32::new(0);
@@ -41,7 +41,7 @@ pub struct Network {
     pub leaves_count: i32,
     pub nodes: Vec<Node>,
     connections_to: HashMap<i32, Vec<usize>>,
-    mode: NetworkMode,
+    pub mode: NetworkMode,
     tape: Rc<RefCell<Tape>>,
 }
 
@@ -299,7 +299,7 @@ impl Network {
                         _ => vec![go_in],
                     };
                     for (ii, connection) in connections.iter().enumerate() {
-                        let mut x = &mut go_in.pop().unwrap() * &mut node.weights[ii];
+                        let mut x = &mut node.weights[ii] * &mut go_in.pop().unwrap();
                         let running_value = &mut running_values[*connection];
                         running_values[*connection] = running_value + &mut x;
                     }
@@ -316,7 +316,7 @@ impl Network {
                         _ => vec![go_in],
                     };
                     for (ii, connection) in connections.iter().enumerate() {
-                        let mut x = &mut go_in.pop().unwrap() * &mut node.weights[ii];
+                        let mut x = &mut node.weights[ii] * &mut go_in.pop().unwrap();
                         let running_value = &mut running_values[*connection];
                         running_values[*connection] = running_value + &mut x;
                     }
@@ -324,6 +324,64 @@ impl Network {
                 NodeKind::Leaf => {
                     output[node.leaf_id as usize] =
                         std::mem::replace(&mut running_values[i], Tensor0D::new_without_tape(0.));
+                }
+            }
+        }
+        output
+    }
+
+    pub fn forward_batch<const N: usize>(
+        &mut self,
+        mut input: Vec<Tensor1D<N>>,
+    ) -> Vec<Tensor1D<N>> {
+        let mut output: Vec<Tensor1D<N>> = Vec::with_capacity(self.leaves_count as usize);
+        output.resize(
+            self.leaves_count as usize,
+            Tensor1D::new_without_tape([0.; N]),
+        );
+        let mut running_values: Vec<Tensor1D<N>> = Vec::with_capacity(self.nodes.len());
+        running_values.resize(self.nodes.len(), Tensor1D::new_without_tape([0.; N]));
+        for (i, node) in self.nodes.iter_mut().enumerate() {
+            match node.kind {
+                NodeKind::Input => {
+                    let connections = self.connections_to.get(&node.id).unwrap();
+                    let go_in = input.pop().unwrap();
+                    // let go_in = &mut input.remove(0)
+                    //     + &mut (&mut node.weights[0] * &mut Tensor0D::new_without_tape(1.));
+                    let mut go_in = match connections.len() > 1 {
+                        true => go_in.split_on_add(connections.len()),
+                        _ => vec![go_in],
+                    };
+                    for (ii, connection) in connections.iter().enumerate() {
+                        let mut x = &mut node.weights[ii] * &mut go_in.pop().unwrap();
+                        let running_value = &mut running_values[*connection];
+                        running_values[*connection] = running_value + &mut x;
+                    }
+                }
+                NodeKind::Normal => {
+                    let connections = self.connections_to.get(&node.id).unwrap();
+                    let mut go_in = std::mem::replace(
+                        &mut running_values[i],
+                        Tensor1D::new_without_tape([0.; N]),
+                    );
+                    // let mut go_in = &mut running_values[i]
+                    //     + &mut (&mut node.weights[0] * &mut Tensor0D::new_without_tape(1.));
+                    let go_in = Tensor1D::mish(&mut go_in);
+                    let mut go_in = match connections.len() > 1 {
+                        true => go_in.split_on_add(connections.len()),
+                        _ => vec![go_in],
+                    };
+                    for (ii, connection) in connections.iter().enumerate() {
+                        let mut x = &mut node.weights[ii] * &mut go_in.pop().unwrap();
+                        let running_value = &mut running_values[*connection];
+                        running_values[*connection] = running_value + &mut x;
+                    }
+                }
+                NodeKind::Leaf => {
+                    output[node.leaf_id as usize] = std::mem::replace(
+                        &mut running_values[i],
+                        Tensor1D::new_without_tape([0.; N]),
+                    );
                 }
             }
         }
@@ -476,48 +534,105 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_forward() {
-        let mut network = Network::new(10, 10, 10);
-        // for n in network.nodes.iter_mut() {
-        //     for w in n.weights.iter_mut() {
-        //         match &n.kind {
-        //             NodeKind::Input => {
-        //                 println!("{:?}", w.id);
-        //                 w.data = 0.5;
-        //             }
-        //             _ => {
-        //                 w.data = 0.3;
-        //             }
-        //         }
-        //     }
-        // }
-        network.dump_nodes_and_connections();
-        let input: Vec<Tensor0D> = (0..784)
-            .into_iter()
-            // .map(|x| Tensor0D::new_without_tape((x % 10) as f64 / 10. - 0.5))
-            .map(|x| Tensor0D::new_without_tape(0.5))
-            .collect();
+    fn test_two_models() {
+        let mut network = Network::new(2, 1, 2);
         network.set_mode(NetworkMode::Training);
-        let mut output = network.forward(input);
-        println!();
-        println!("Output: {:?}", output);
-        println!();
-        // let mut loss = output
-        //     .into_iter()
-        //     .fold(Tensor0D::new_without_tape(1.), |mut acc, mut x| {
-        //         &mut x * &mut acc
-        //     });
-        let mut loss = Tensor0D::nll(output, 0);
-        println!();
-        println!("Loss: {}", loss.data);
-        println!();
-        let mut grads = loss.backward();
-        println!();
-        for n in network.nodes.iter() {
-            for w in n.weights.iter() {
-                let g = grads.remove(w.id);
-                println!("{:?}: {} {} - ", n.kind, w.id, g.data);
+
+        // Get grads for network 1
+        {
+            let mut inputs = vec![
+                vec![
+                    Tensor0D::new_without_tape(1.1),
+                    Tensor0D::new_without_tape(1.2),
+                ],
+                vec![
+                    Tensor0D::new_without_tape(1.1),
+                    Tensor0D::new_without_tape(1.2),
+                ],
+            ];
+            let labels = vec![0, 0];
+            // let labels = vec![0];
+            let mut merged_grads: Option<Gradients> = None;
+            for i in 0..labels.len() {
+                let output = network.forward(inputs.remove(0));
+                let loss = &mut Tensor0D::nll(output, labels[i]);
+                println!("\nLoss: {:?}\n", loss);
+                let grads = loss.backward();
+                match &mut merged_grads {
+                    Some(mm) => mm.merge_add(grads),
+                    None => merged_grads = Some(grads),
+                }
+            }
+            println!("\nDone with 1");
+            for (key, value) in merged_grads.unwrap().grads.iter() {
+                println!("key: {} value: {}", key, value.data);
+            }
+        }
+        println!("\n\nBREAK\n\n");
+        // Get grads for network 1 batch
+        {
+            let mut inputs = vec![
+                // Tensor1D::new_without_tape([1.1]),
+                // Tensor1D::new_without_tape([1.2]),
+                // Tensor1D::new_without_tape([1.3]),
+                Tensor1D::new_without_tape([1.1, 1.1]),
+                Tensor1D::new_without_tape([1.2, 1.2]),
+            ];
+            let mut labels = vec![0, 0];
+            let outputs = network.forward_batch(inputs);
+            let loss = &mut Tensor1D::nll(outputs, labels);
+            println!("Loss: {:?}\n", loss);
+            let grads = loss.backward();
+            println!("\nDone with 2");
+            for (key, value) in grads.grads.iter() {
+                println!("key: {} value: {}", key, value.data);
             }
         }
     }
+
+    // #[test]
+    // fn test_forward() {
+    //     let mut network = Network::new(10, 10, 10);
+    //     // for n in network.nodes.iter_mut() {
+    //     //     for w in n.weights.iter_mut() {
+    //     //         match &n.kind {
+    //     //             NodeKind::Input => {
+    //     //                 println!("{:?}", w.id);
+    //     //                 w.data = 0.5;
+    //     //             }
+    //     //             _ => {
+    //     //                 w.data = 0.3;
+    //     //             }
+    //     //         }
+    //     //     }
+    //     // }
+    //     network.dump_nodes_and_connections();
+    //     let input: Vec<Tensor0D> = (0..784)
+    //         .into_iter()
+    //         // .map(|x| Tensor0D::new_without_tape((x % 10) as f64 / 10. - 0.5))
+    //         .map(|x| Tensor0D::new_without_tape(0.5))
+    //         .collect();
+    //     network.set_mode(NetworkMode::Training);
+    //     let mut output = network.forward(input);
+    //     println!();
+    //     println!("Output: {:?}", output);
+    //     println!();
+    //     // let mut loss = output
+    //     //     .into_iter()
+    //     //     .fold(Tensor0D::new_without_tape(1.), |mut acc, mut x| {
+    //     //         &mut x * &mut acc
+    //     //     });
+    //     let mut loss = Tensor0D::nll(output, 0);
+    //     println!();
+    //     println!("Loss: {}", loss.data);
+    //     println!();
+    //     let mut grads = loss.backward();
+    //     println!();
+    //     for n in network.nodes.iter() {
+    //         for w in n.weights.iter() {
+    //             let g = grads.remove(w.id);
+    //             println!("{:?}: {} {} - ", n.kind, w.id, g.data);
+    //         }
+    //     }
+    // }
 }

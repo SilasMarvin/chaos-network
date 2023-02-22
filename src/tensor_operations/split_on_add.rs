@@ -1,16 +1,15 @@
-use crate::tensors::Tensor0D;
+use crate::tensors::{Tensor0D, Tensor1D};
 
 impl Tensor0D {
-    pub fn split_on_add(mut self, count: usize) -> Vec<Self> {
-        match self.tape.take() {
+    pub fn split_on_add(self, count: usize) -> Vec<Self> {
+        match &self.tape {
             Some(tape) => {
                 let mut new_tensors: Vec<Tensor0D> = (0..count)
                     .map(|_i| Tensor0D::new_with_tape(self.data, Some(tape.clone())))
                     .collect();
-                // new_tensors[0].tape.as_mut().unwrap().merge(tape);
                 for t in new_tensors.iter_mut() {
-                    let self_id = t.id;
-                    let old_self_id = self.id;
+                    let self_id = t.grad_for;
+                    let old_self_id = self.grad_for;
                     // For each split elment grab their gradients, and the parent gradients, and
                     // add them together
                     t.tape.as_mut().unwrap().borrow_mut().add_operation((
@@ -22,22 +21,42 @@ impl Tensor0D {
                             g.insert(old_self_id, tg2);
                         }),
                     ));
-                    // t.tape.as_mut().unwrap().add_operation((
-                    //     self_id,
-                    //     Box::new(move |g| {
-                    //         let tg = g.remove(self_id);
-                    //         let mut tg2 = g.remove(old_self_id);
-                    //         println!("In split_on_add: {} {} {}", tg.data, tg2.data, old_self_id);
-                    //         tg2.data *= tg.data;
-                    //         println!("New data being stored: {}", tg2.data);
-                    //         g.insert(old_self_id, tg2);
-                    //     }),
-                    // ));
                 }
                 new_tensors
             }
             None => (0..count)
                 .map(|_i| Tensor0D::new_without_tape(self.data))
+                .collect(),
+        }
+    }
+}
+
+impl<const N: usize> Tensor1D<N> {
+    pub fn split_on_add(self, count: usize) -> Vec<Self> {
+        match &self.tape {
+            Some(tape) => {
+                let mut new_tensors: Vec<Tensor1D<N>> = (0..count)
+                    .map(|_i| Self::new_with_tape(self.data, Some(tape.clone())))
+                    .collect();
+                for t in new_tensors.iter_mut() {
+                    let self_id = t.grad_for;
+                    let old_self_id = self.grad_for;
+                    // For each split elment grab their gradients, and the parent gradients, and
+                    // add them together
+                    t.tape.as_mut().unwrap().borrow_mut().add_operation((
+                        self_id,
+                        Box::new(move |g| {
+                            let tg = g.remove(self_id);
+                            let mut tg2 = g.remove_or_0(old_self_id);
+                            tg2.data += tg.data;
+                            g.insert(old_self_id, tg2);
+                        }),
+                    ));
+                }
+                new_tensors
+            }
+            None => (0..count)
+                .map(|_i| Tensor1D::new_without_tape(self.data))
                 .collect(),
         }
     }

@@ -50,7 +50,7 @@ impl Tape {
 
 #[derive(Debug)]
 pub struct Gradients {
-    grads: FxHashMap<u64, Tensor0D>,
+    pub grads: FxHashMap<u64, Tensor0D>,
 }
 
 impl Gradients {
