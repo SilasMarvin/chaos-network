@@ -2,6 +2,7 @@ use crate::tensors::{Tensor, Tensor0D, Tensor1D};
 
 impl Tensor0D {
     pub fn nll(t: Vec<Self>, index: usize) -> Self {
+        println!("NLL");
         let sum_e = t.iter().fold(0., |acc, t| acc + t.data.exp());
         let log_softmax: Vec<f64> = t.iter().map(|t| (t.data.exp() / sum_e).ln()).collect();
         let loss = -1. * log_softmax[index];
@@ -36,6 +37,7 @@ impl Tensor0D {
 
 impl<const N: usize> Tensor1D<N> {
     pub fn nll(t: Vec<Self>, indexes: Vec<usize>) -> Self {
+        println!("NLL");
         let sum_e = t.iter().fold([0.; N], |mut acc, t| {
             t.data
                 .iter()

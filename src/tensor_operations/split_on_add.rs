@@ -2,6 +2,7 @@ use crate::tensors::{Tensor0D, Tensor1D};
 
 impl Tensor0D {
     pub fn split_on_add(self, count: usize) -> Vec<Self> {
+        println!("SPA");
         match &self.tape {
             Some(tape) => {
                 let mut new_tensors: Vec<Tensor0D> = (0..count)
@@ -18,6 +19,7 @@ impl Tensor0D {
                             let tg = g.remove(self_id);
                             let mut tg2 = g.remove_or_0(old_self_id);
                             tg2.data += tg.data;
+                            println!("SPA Insert: {}", tg2.data);
                             g.insert(old_self_id, tg2);
                         }),
                     ));
@@ -33,6 +35,7 @@ impl Tensor0D {
 
 impl<const N: usize> Tensor1D<N> {
     pub fn split_on_add(self, count: usize) -> Vec<Self> {
+        println!("SPA");
         match &self.tape {
             Some(tape) => {
                 let mut new_tensors: Vec<Tensor1D<N>> = (0..count)
@@ -49,6 +52,7 @@ impl<const N: usize> Tensor1D<N> {
                             let tg = g.remove(self_id);
                             let mut tg2 = g.remove_or_0(old_self_id);
                             tg2.data += tg.data;
+                            println!("SPA Insert: {}", tg2.data);
                             g.insert(old_self_id, tg2);
                         }),
                     ));

@@ -5,6 +5,7 @@ impl<'a, 'b> Mul<&'b mut Tensor0D> for &'a mut Tensor0D {
     type Output = Tensor0D;
 
     fn mul(self, other: &'b mut Tensor0D) -> Self::Output {
+        println!("MUL");
         let mut new = Tensor0D::new_without_tape(self.data * other.data);
 
         new.tape = match (&self.tape, &other.tape) {
@@ -21,6 +22,7 @@ impl<'a, 'b> Mul<&'b mut Tensor0D> for &'a mut Tensor0D {
                         let mut tg2 = tg1.clone();
                         tg1.data *= other_data;
                         tg2.data *= self_data;
+                        println!("Mul Insert: {} {}", tg1.data, tg2.data);
                         g.insert(self_id, tg1);
                         g.insert(other_id, tg2);
                     }),
@@ -36,6 +38,7 @@ impl<'a, 'b> Mul<&'b mut Tensor0D> for &'a mut Tensor0D {
                     Box::new(move |g| {
                         let mut tg = g.remove(new_id);
                         tg.data *= other_data;
+                        println!("Mul Insert: {}", tg.data);
                         g.insert(self_id, tg);
                     }),
                 ));
@@ -67,6 +70,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D {
     type Output = Tensor1D<N>;
 
     fn mul(self, other: &'b mut Tensor1D<N>) -> Self::Output {
+        println!("MUL");
         // Even if self.tape is None, this will work
         let new_data: [f64; N] = other.data.map(|d| self.data * d);
         let mut new = Tensor1D::new_without_tape(new_data);
@@ -85,6 +89,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D {
                         let mut tg2 = tg1.clone();
                         tg1.data *= other_data;
                         tg2.data *= self_data;
+                        println!("Mul Insert: {} {}", tg1.data, tg2.data);
                         g.insert(self_id, tg1);
                         g.insert(other_id, tg2);
                     }),
@@ -100,6 +105,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D {
                     Box::new(move |g| {
                         let mut tg = g.remove(new_id);
                         tg.data *= other_data;
+                        println!("Mul Insert: {}", tg.data);
                         g.insert(self_id, tg);
                     }),
                 ));

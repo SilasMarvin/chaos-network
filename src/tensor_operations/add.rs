@@ -5,6 +5,7 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
     type Output = Tensor0D;
 
     fn add(self, other: &'b mut Tensor0D) -> Self::Output {
+        println!("ADD");
         let mut new = Tensor0D::new_without_tape(self.data + other.data);
         new.tape = match (&self.tape, &other.tape) {
             (Some(self_tape), Some(_other_tape)) => {
@@ -24,10 +25,12 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
                 Some(self_tape.clone())
             }
             (Some(self_tape), None) => {
+                println!("ADD grad_for");
                 new.grad_for = self.id;
                 Some(self_tape.clone())
             }
             (None, Some(other_tape)) => {
+                println!("ADD grad_for");
                 new.grad_for = other.id;
                 Some(other_tape.clone())
             }
@@ -42,6 +45,7 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
     type Output = Tensor1D<N>;
 
     fn add(self, other: &'b mut Tensor1D<N>) -> Self::Output {
+        println!("ADD");
         let mut tracker = 0;
         let new_data: [f64; N] = self.data.map(|a| {
             let x = a + other.data[tracker];
@@ -49,8 +53,7 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
             x
         });
         let mut new = Tensor1D::new_without_tape(new_data);
-
-        match (&self.tape, &other.tape) {
+        new.tape = match (&self.tape, &other.tape) {
             (Some(self_tape), Some(_other_tape)) => {
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
@@ -65,18 +68,18 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
                         g.insert(other_id, tg2);
                     }),
                 ));
-                new.set_tape(self.tape.clone());
+                self.tape.clone()
             }
             (Some(_self_tape), None) => {
                 new.grad_for = self.id;
-                new.set_tape(self.tape.clone());
+                self.tape.clone()
             }
             (None, Some(_other_tape)) => {
                 new.grad_for = other.id;
-                new.set_tape(other.tape.clone());
+                other.tape.clone()
             }
-            (None, None) => (),
-        }
+            (None, None) => None,
+        };
 
         new
     }
