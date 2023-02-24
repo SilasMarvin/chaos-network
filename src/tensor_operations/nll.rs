@@ -1,43 +1,42 @@
-use crate::tensors::{Tensor, Tensor0D, Tensor1D};
+use crate::tensors::{element_wise_mul, Tensor, Tensor0D, Tensor1D};
 
-impl Tensor0D {
-    pub fn nll(t: Vec<Self>, index: usize) -> Self {
-        println!("NLL");
-        let sum_e = t.iter().fold(0., |acc, t| acc + t.data.exp());
-        let log_softmax: Vec<f64> = t.iter().map(|t| (t.data.exp() / sum_e).ln()).collect();
-        let loss = -1. * log_softmax[index];
-        let mut new = Tensor0D::new_without_tape(loss);
-        for (i, mut tensor) in t.into_iter().enumerate() {
-            if let Some(tape) = tensor.tape.take() {
-                let new_id = new.grad_for;
-                let self_id = tensor.grad_for;
-                let softmax_value = tensor.data.exp() / sum_e;
-                let sub_one = index == i;
-                tape.borrow_mut().add_operation((
-                    new_id,
-                    Box::new(move |g| {
-                        let mut tg = g.remove(new_id);
-                        if sub_one {
-                            tg.data *= softmax_value - 1.;
-                        } else {
-                            tg.data *= softmax_value;
-                        }
-                        println!("NLL Insert: {}", tg.data);
-                        g.insert(self_id, tg);
-                    }),
-                ));
-                if matches!(new.tape, None) {
-                    new.tape = Some(tape);
-                }
-            }
-        }
-        new
-    }
-}
+// impl Tensor0D {
+//     pub fn nll(t: Vec<Self>, index: usize) -> Self {
+//         println!("NLL");
+//         let sum_e = t.iter().fold(0., |acc, t| acc + t.data.exp());
+//         let log_softmax: Vec<f64> = t.iter().map(|t| (t.data.exp() / sum_e).ln()).collect();
+//         let loss = -1. * log_softmax[index];
+//         let mut new = Tensor0D::new_without_tape(loss);
+//         for (i, mut tensor) in t.into_iter().enumerate() {
+//             if let Some(tape) = tensor.tape.take() {
+//                 let new_id = new.grad_for;
+//                 let self_id = tensor.grad_for;
+//                 let softmax_value = tensor.data.exp() / sum_e;
+//                 let sub_one = index == i;
+//                 tape.borrow_mut().add_operation((
+//                     new_id,
+//                     Box::new(move |g| {
+//                         let mut tg = g.remove(new_id);
+//                         if sub_one {
+//                             tg.data *= softmax_value - 1.;
+//                         } else {
+//                             tg.data *= softmax_value;
+//                         }
+//                         println!("NLL Insert: {}", tg.data);
+//                         g.insert(self_id, tg);
+//                     }),
+//                 ));
+//                 if matches!(new.tape, None) {
+//                     new.tape = Some(tape);
+//                 }
+//             }
+//         }
+//         new
+//     }
+// }
 
 impl<const N: usize> Tensor1D<N> {
     pub fn nll(t: Vec<Self>, indexes: Vec<usize>) -> Self {
-        println!("NLL");
         let sum_e = t.iter().fold([0.; N], |mut acc, t| {
             t.data
                 .iter()
@@ -69,24 +68,19 @@ impl<const N: usize> Tensor1D<N> {
                 let new_id = new.grad_for;
                 let self_id = tensor.grad_for;
                 let mut tracker = 0;
-                let softmax_value: f64 = tensor
-                    .data
-                    .map(|x| {
-                        let mut x = x.exp() / sum_e[tracker];
-                        if i == indexes[tracker] {
-                            x -= 1.;
-                        }
-                        tracker += 1;
-                        x
-                    })
-                    .iter()
-                    .sum();
+                let softmax_value = tensor.data.map(|x| {
+                    let mut x = x.exp() / sum_e[tracker];
+                    if i == indexes[tracker] {
+                        x -= 1.;
+                    }
+                    tracker += 1;
+                    x
+                });
                 tape.borrow_mut().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let mut tg = g.remove(new_id);
-                        tg.data *= softmax_value;
-                        println!("NLL Insert: {}", tg.data);
+                        tg.data = element_wise_mul::<N>(&tg.data, &softmax_value);
                         g.insert(self_id, tg);
                     }),
                 ));
@@ -106,27 +100,47 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    // #[test]
-    // fn test_nll_1d() {
-    //     let tape = Some(Rc::new(RefCell::new(Tape::new())));
-    //     let a = vec![
-    //         Tensor1D::new_with_tape([1.; 3], tape.clone()),
-    //         Tensor1D::new_with_tape([2.; 3], tape.clone()),
-    //         Tensor1D::new_with_tape([3.; 3], tape.clone()),
-    //     ];
-    //     let ids = [a[0].id, a[1].id, a[2].id];
-    //     let mut b = Tensor1D::nll(a, vec![0, 1, 2]);
-    //     assert_eq!(2.40760596444438, b.data[0]);
-    //     assert_eq!(1.4076059644443801, b.data[1]);
-    //     assert_eq!(0.4076059644443803, b.data[2]);
-    //     let mut grads = b.backward();
-    //     let a_0_grads = grads.remove(ids[0]);
-    //     let a_1_grads = grads.remove(ids[1]);
-    //     let a_2_grads = grads.remove(ids[2]);
-    //     assert_eq!(-0.7299082804888587, a_0_grads.data);
-    //     assert_eq!(-0.265814586835607, a_1_grads.data);
-    //     assert_eq!(0.9957228673244657, a_2_grads.data);
-    // }
+    const BATCH_SIZE: usize = 3;
+
+    #[test]
+    // Might need to double check this one
+    fn test_nll_1d() {
+        let tape: Rc<RefCell<Tape<BATCH_SIZE>>> = Rc::new(RefCell::new(Tape::new()));
+        let a = vec![
+            Tensor1D::new_with_tape([1.; 3], Some(tape.clone())),
+            Tensor1D::new_with_tape([2.; 3], Some(tape.clone())),
+            Tensor1D::new_with_tape([3.; 3], Some(tape.clone())),
+        ];
+        let ids = [a[0].id, a[1].id, a[2].id];
+        let mut b = Tensor1D::nll(a, vec![0, 1, 2]);
+        assert_eq!(2.40760596444438, b.data[0]);
+        assert_eq!(1.4076059644443801, b.data[1]);
+        assert_eq!(0.4076059644443803, b.data[2]);
+        let mut grads = b.backward();
+        let a_0_grads = grads.remove(ids[0]);
+        let a_1_grads = grads.remove(ids[1]);
+        let a_2_grads = grads.remove(ids[2]);
+        assert_eq!(
+            [
+                -0.9099694268296196,
+                0.09003057317038046,
+                0.09003057317038046
+            ],
+            a_0_grads.data
+        );
+        assert_eq!(
+            [
+                0.24472847105479767,
+                -0.7552715289452023,
+                0.24472847105479767
+            ],
+            a_1_grads.data
+        );
+        assert_eq!(
+            [0.6652409557748219, 0.6652409557748219, -0.3347590442251781],
+            a_2_grads.data
+        );
+    }
 
     // #[test]
     // fn test_nll_0d() {

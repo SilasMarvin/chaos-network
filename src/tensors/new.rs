@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 
 pub static TENSOR_COUNT: AtomicU64 = AtomicU64::new(0);
 
-impl Tensor0D {
-    pub fn new_with_tape(data: f64, tape: Option<Rc<RefCell<Tape>>>) -> Self {
+impl<const N: usize> Tensor0D<N> {
+    pub fn new_with_tape(data: f64, tape: Option<Rc<RefCell<Tape<N>>>>) -> Self {
         let id_grad_for = TENSOR_COUNT.fetch_add(1, Ordering::SeqCst);
         Self {
             id: id_grad_for,
@@ -30,7 +30,7 @@ impl Tensor0D {
 }
 
 impl<const N: usize> Tensor1D<N> {
-    pub fn new_with_tape(data: [f64; N], tape: Option<Rc<RefCell<Tape>>>) -> Self {
+    pub fn new_with_tape(data: [f64; N], tape: Option<Rc<RefCell<Tape<N>>>>) -> Self {
         // let id_grad_for = u64::MAX;
         let id_grad_for = TENSOR_COUNT.fetch_add(1, Ordering::SeqCst);
         Self {

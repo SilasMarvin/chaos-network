@@ -1,51 +1,50 @@
 use crate::tensors::{Tensor, Tensor0D, Tensor1D};
 use std::ops::Add;
 
-impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
-    type Output = Tensor0D;
-
-    fn add(self, other: &'b mut Tensor0D) -> Self::Output {
-        println!("ADD");
-        let mut new = Tensor0D::new_without_tape(self.data + other.data);
-        new.tape = match (&self.tape, &other.tape) {
-            (Some(self_tape), Some(_other_tape)) => {
-                let new_id = new.grad_for;
-                let self_id = self.grad_for;
-                let other_id = other.grad_for;
-                self_tape.borrow_mut().add_operation((
-                    new_id,
-                    Box::new(move |g| {
-                        let tg1 = g.remove(new_id);
-                        let tg2 = tg1.clone();
-                        println!("Add Insert: {} {}", tg1.data, tg2.data);
-                        g.insert(self_id, tg1);
-                        g.insert(other_id, tg2);
-                    }),
-                ));
-                Some(self_tape.clone())
-            }
-            (Some(self_tape), None) => {
-                println!("ADD grad_for");
-                new.grad_for = self.id;
-                Some(self_tape.clone())
-            }
-            (None, Some(other_tape)) => {
-                println!("ADD grad_for");
-                new.grad_for = other.id;
-                Some(other_tape.clone())
-            }
-            (None, None) => None,
-        };
-
-        new
-    }
-}
+// impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
+//     type Output = Tensor0D;
+//
+//     fn add(self, other: &'b mut Tensor0D) -> Self::Output {
+//         println!("ADD");
+//         let mut new = Tensor0D::new_without_tape(self.data + other.data);
+//         new.tape = match (&self.tape, &other.tape) {
+//             (Some(self_tape), Some(_other_tape)) => {
+//                 let new_id = new.grad_for;
+//                 let self_id = self.grad_for;
+//                 let other_id = other.grad_for;
+//                 self_tape.borrow_mut().add_operation((
+//                     new_id,
+//                     Box::new(move |g| {
+//                         let tg1 = g.remove(new_id);
+//                         let tg2 = tg1.clone();
+//                         println!("Add Insert: {} {}", tg1.data, tg2.data);
+//                         g.insert(self_id, tg1);
+//                         g.insert(other_id, tg2);
+//                     }),
+//                 ));
+//                 Some(self_tape.clone())
+//             }
+//             (Some(self_tape), None) => {
+//                 println!("ADD grad_for");
+//                 new.grad_for = self.id;
+//                 Some(self_tape.clone())
+//             }
+//             (None, Some(other_tape)) => {
+//                 println!("ADD grad_for");
+//                 new.grad_for = other.id;
+//                 Some(other_tape.clone())
+//             }
+//             (None, None) => None,
+//         };
+//
+//         new
+//     }
+// }
 
 impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
     type Output = Tensor1D<N>;
 
     fn add(self, other: &'b mut Tensor1D<N>) -> Self::Output {
-        println!("ADD");
         let mut tracker = 0;
         let new_data: [f64; N] = self.data.map(|a| {
             let x = a + other.data[tracker];
@@ -63,7 +62,6 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
                     Box::new(move |g| {
                         let tg1 = g.remove(new_id);
                         let tg2 = tg1.clone();
-                        println!("Add Insert: {} {}", tg1.data, tg2.data);
                         g.insert(self_id, tg1);
                         g.insert(other_id, tg2);
                     }),

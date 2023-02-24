@@ -1,13 +1,13 @@
 use crate::network::{Network, Node};
 use std::fmt;
 
-impl fmt::Debug for Node {
+impl<const N: usize> fmt::Debug for Node<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Node: {} kind: {:?}", self.id, self.kind)
     }
 }
 
-impl fmt::Debug for Network {
+impl<const N: usize> fmt::Debug for Network<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,

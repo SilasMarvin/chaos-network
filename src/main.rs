@@ -5,73 +5,57 @@ mod network;
 mod tensor_operations;
 mod tensors;
 
-use crate::gradients::Gradients;
 use crate::network::{Network, NetworkMode};
-use crate::tensors::{Tensor, Tensor0D, Tensor1D};
+use crate::tensors::{Tensor, Tensor1D};
 
 const TRAINING_EPOCHS: usize = 200;
-const EXAMPLES_PER_VALIDATION: usize = 1000;
-const EXAMPLES_PER_EPOCH: usize = 2000;
+const EXAMPLES_PER_VALIDATION: usize = 10000;
+const EXAMPLES_PER_EPOCH: usize = 20000;
 const INPUTS: usize = 784;
 const OUTPUTS: usize = 10;
-const BATCH_SIZE: usize = 8;
+const BATCH_SIZE: usize = 32;
 
-fn validate(network: &mut Network, mnist: &Mnist) -> f64 {
-    let mut correct = 0.;
-    for i in 0..EXAMPLES_PER_VALIDATION {
-        let input: Vec<Tensor0D> = mnist.test_data[i]
-            .iter()
-            .map(|x| Tensor0D::new_without_tape(*x as f64 / 255.))
-            .collect();
-        let label = mnist.test_labels[i] as usize;
-        let output = network.forward(input);
-        let guess = output
-            .into_iter()
-            .enumerate()
-            .fold((0, f64::NEG_INFINITY), |acc, (i, t)| {
-                if t.data > acc.1 {
-                    (i, t.data)
-                } else {
-                    acc
-                }
+fn validate(network: &mut Network<BATCH_SIZE>, mnist: &Mnist) -> f64 {
+    network.set_mode(NetworkMode::Inference);
+    let mut correct: usize = 0;
+    for ii in 0..(EXAMPLES_PER_VALIDATION / BATCH_SIZE) {
+        // Prep the data
+        let start = ii * BATCH_SIZE;
+        let inputs: Vec<Tensor1D<BATCH_SIZE>> = (0..INPUTS)
+            .map(|i| {
+                let data: [f64; BATCH_SIZE] = (start..start + BATCH_SIZE)
+                    .map(|ii| mnist.train_data[ii][i] as f64 / 255.)
+                    .collect::<Vec<f64>>()
+                    .try_into()
+                    .unwrap();
+                Tensor1D::new_without_tape(data)
             })
-            .0;
-        if label == guess {
-            correct += 1.;
-        }
-    }
-    correct / EXAMPLES_PER_VALIDATION as f64
-}
-
-fn train_epoch(network: &mut Network, mnist: &Mnist) {
-    network.set_mode(NetworkMode::Training);
-    let mut merged_grads: Option<Gradients> = None;
-    for ii in 0..EXAMPLES_PER_EPOCH {
-        // Prep data
-        let input: Vec<Tensor0D> = mnist.train_data[ii]
-            .iter()
-            .map(|x| Tensor0D::new_without_tape(*x as f64 / 255.))
             .collect();
-        let label = mnist.train_labels[ii] as usize;
-
-        // Forward and backward
-        let output = network.forward(input);
-        let loss = &mut Tensor0D::nll(output, label);
-        let grads = loss.backward();
-        match &mut merged_grads {
-            Some(mm) => mm.merge_add(grads),
-            None => merged_grads = Some(grads),
-        }
-
-        // Apply merged grads
-        if ii % BATCH_SIZE == 0 {
-            network.apply_gradients(merged_grads.unwrap(), 1.0);
-            merged_grads = None;
-        }
+        let labels: Vec<usize> = (start..start + BATCH_SIZE)
+            .map(|i| mnist.train_labels[i] as usize)
+            .collect();
+        let outputs = network.forward_batch(inputs);
+        let guesses: Vec<usize> = (0..BATCH_SIZE)
+            .map(|i| {
+                let mut max: (usize, f64) = (0, outputs[0].data[i]);
+                for ii in 0..OUTPUTS {
+                    if outputs[ii].data[i] > max.1 {
+                        max = (ii, outputs[ii].data[i]);
+                    }
+                }
+                max.0
+            })
+            .collect();
+        correct += guesses
+            .iter()
+            .enumerate()
+            .filter(|(i, g)| **g == labels[*i])
+            .count();
     }
+    (correct as f64) / (EXAMPLES_PER_VALIDATION - (EXAMPLES_PER_VALIDATION % BATCH_SIZE)) as f64
 }
 
-fn train_epoch_batch(network: &mut Network, mnist: &Mnist) {
+fn train_epoch_batch(network: &mut Network<BATCH_SIZE>, mnist: &Mnist) {
     network.set_mode(NetworkMode::Training);
     for ii in 0..(EXAMPLES_PER_EPOCH / BATCH_SIZE) {
         // Prep the data
@@ -94,25 +78,23 @@ fn train_epoch_batch(network: &mut Network, mnist: &Mnist) {
         let outputs = network.forward_batch(inputs);
         let loss = &mut Tensor1D::nll(outputs, labels);
         let grads = loss.backward();
-        network.apply_gradients(grads, 1.0);
+        network.apply_gradients(grads);
     }
 }
 
-fn build_network() -> Network {
-    let network = Network::new(INPUTS, 512, OUTPUTS);
+fn build_network<const N: usize>() -> Network<N> {
+    let network: Network<N> = Network::new(INPUTS, 512, OUTPUTS);
     network
 }
 
 fn main() {
     let mnist = Mnist::new("data/");
 
-    let mut network = build_network();
+    let mut network = build_network::<BATCH_SIZE>();
     println!("{:?}", network);
 
     for i in 0..TRAINING_EPOCHS {
-        // train_epoch(&mut network, &mnist);
         train_epoch_batch(&mut network, &mnist);
-        network.set_mode(NetworkMode::Inference);
         let percent_correct = validate(&mut network, &mnist);
 
         // Print some nice things for us
