@@ -1,9 +1,6 @@
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 
-use crate::tensors::{Tensor, Tensor0D, Tensor1D};
-
-const WORKERS: usize = 32;
+use crate::tensors::{Tensor, Tensor1D};
 
 #[derive(Default)]
 pub struct Tape<const N: usize> {
