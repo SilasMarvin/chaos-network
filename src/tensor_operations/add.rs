@@ -1,43 +1,40 @@
-use crate::tensors::Tensor0D;
+use crate::tensors::Tensor1D;
 use std::ops::Add;
 
-impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
-    type Output = Tensor0D;
+impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
+    type Output = Tensor1D<N>;
 
-    fn add(self, other: &'b mut Tensor0D) -> Self::Output {
-        let mut new = Tensor0D::new_without_tape(self.data + other.data);
-
-        new.tape = match (self.tape.take(), other.tape.take()) {
-            (Some(mut self_tape), Some(other_tape)) => {
-                self_tape.merge(other_tape);
-                let new_id = new.id;
-                let self_id = self.id;
-                let other_id = other.id;
-                self_tape.add_operation(Box::new(move |g| {
-                    let tg1 = g.remove(new_id);
-                    let tg2 = tg1.clone();
-                    g.insert(self_id, tg1);
-                    g.insert(other_id, tg2);
-                }));
-                Some(self_tape)
+    fn add(self, other: &'b mut Tensor1D<N>) -> Self::Output {
+        let mut tracker = 0;
+        let new_data: [f64; N] = self.data.map(|a| {
+            let x = a + other.data[tracker];
+            tracker += 1;
+            x
+        });
+        let mut new = Tensor1D::new_without_tape(new_data);
+        new.tape = match (&self.tape, &other.tape) {
+            (Some(self_tape), Some(_other_tape)) => {
+                let new_id = new.grad_for;
+                let self_id = self.grad_for;
+                let other_id = other.grad_for;
+                self_tape.borrow_mut().add_operation((
+                    new_id,
+                    Box::new(move |g| {
+                        let tg1 = g.remove(new_id);
+                        let tg2 = tg1.clone();
+                        g.insert(self_id, tg1);
+                        g.insert(other_id, tg2);
+                    }),
+                ));
+                self.tape.clone()
             }
-            (Some(mut self_tape), None) => {
-                let new_id = new.id;
-                let self_id = self.id;
-                self_tape.add_operation(Box::new(move |g| {
-                    let tg = g.remove(new_id);
-                    g.insert(self_id, tg);
-                }));
-                Some(self_tape)
+            (Some(_self_tape), None) => {
+                new.grad_for = self.id;
+                self.tape.clone()
             }
-            (None, Some(mut other_tape)) => {
-                let new_id = new.id;
-                let other_id = other.id;
-                other_tape.add_operation(Box::new(move |g| {
-                    let tg = g.remove(new_id);
-                    g.insert(other_id, tg);
-                }));
-                Some(other_tape)
+            (None, Some(_other_tape)) => {
+                new.grad_for = other.id;
+                other.tape.clone()
             }
             (None, None) => None,
         };
@@ -49,20 +46,23 @@ impl<'a, 'b> Add<&'b mut Tensor0D> for &'a mut Tensor0D {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tensors::Tensor;
+    use crate::{gradients::Tape, tensors::Tensor};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
-    fn test_add_0d() {
-        let mut a = Tensor0D::new_with_tape(1.);
-        let mut b = Tensor0D::new_with_tape(2.);
+    fn test_add_1d_dual_grad() {
+        let tape: Rc<RefCell<Tape<3>>> = Rc::new(RefCell::new(Tape::new()));
+        let mut a = Tensor1D::new_with_tape([1., 2., 3.], Some(tape.clone()));
+        let mut b = Tensor1D::new_with_tape([2., 3., 4.], Some(tape.clone()));
         let mut c = &mut a + &mut b;
         // Check value match
-        assert_eq!(3., c.data);
+        assert_eq!([3., 5., 7.], c.data);
         // Check gradients
         let mut grads = c.backward();
-        let a_grads = grads.remove(a.id);
-        let b_grads = grads.remove(b.id);
-        assert_eq!(1., a_grads.data);
-        assert_eq!(1., b_grads.data);
+        let a_grads = grads.remove(a.grad_for);
+        let b_grads = grads.remove(b.grad_for);
+        assert_eq!([1., 1., 1.], a_grads.data);
+        assert_eq!([1., 1., 1.], b_grads.data);
     }
 }

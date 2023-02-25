@@ -1,25 +1,29 @@
-use crate::tensors::Tensor0D;
+use crate::tensors::{element_wise_mul, Tensor1D};
 
-impl Tensor0D {
+fn do_mish_backward(x: f64) -> f64 {
+    let w = (4. * (x + 1.)) + (4. * (2. * x).exp()) + (3. * x).exp() + (x.exp() * ((4. * x) + 6.));
+    let d = (2. * x.exp()) + (2. * x).exp() + 2.;
+    (x.exp() * w) / d.powi(2)
+}
+
+impl<const N: usize> Tensor1D<N> {
     pub fn mish(t: &mut Self) -> Self {
-        let data = t.data * ((1. + t.data.exp()).ln()).tanh();
-        let mut new = Tensor0D::new_without_tape(data);
+        let data = t.data.map(|x| x * ((1. + x.exp()).ln()).tanh());
+        let mut new = Tensor1D::new_with_tape(data, t.tape.clone());
 
-        if let Some(mut tape) = t.tape.take() {
-            let new_id = new.id;
-            let t_data = t.data;
-            let self_id = t.id;
-            tape.add_operation(Box::new(move |g| {
-                let mut tg = g.remove(new_id);
-                let w = (4. * (t_data + 1.))
-                    + (4. * (2. * t_data).exp())
-                    + (3. * t_data).exp()
-                    + (t_data.exp() * ((4. * t_data) + 6.));
-                let d = (2. * t_data.exp()) + (2. * t_data).exp() + 2.;
-                tg.data *= (t_data.exp() * w) / d.powi(2);
-                g.insert(self_id, tg);
-            }));
-            new.tape = Some(tape);
+        if let Some(tape) = &t.tape {
+            let new_id = new.grad_for;
+            let self_id = t.grad_for;
+            let t_data = t.data.map(do_mish_backward);
+            tape.borrow_mut().add_operation((
+                new_id,
+                Box::new(move |g| {
+                    let mut tg = g.remove(new_id);
+                    tg.data = element_wise_mul::<N>(&tg.data, &t_data);
+                    g.insert(self_id, tg);
+                }),
+            ));
+            new.tape = Some(tape.clone());
         }
 
         new
@@ -29,17 +33,26 @@ impl Tensor0D {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tensors::Tensor;
+    use crate::{gradients::Tape, tensors::Tensor};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
-    fn test_mish_0d() {
-        let mut a = Tensor0D::new_with_tape(1.);
-        let mut b = Tensor0D::mish(&mut a);
+    fn test_mish_1d() {
+        let tape: Rc<RefCell<Tape<3>>> = Rc::new(RefCell::new(Tape::new()));
+        let mut a = Tensor1D::new_with_tape([1., 2., 3.], Some(tape.clone()));
+        let mut b = Tensor1D::mish(&mut a);
         // Check value match
-        assert_eq!(0.86509836, b.data);
+        assert_eq!(
+            [0.8650983882673103, 1.9439589595339946, 2.9865350049679575],
+            b.data
+        );
         // Check gradients
         let mut grads = b.backward();
         let a_grads = grads.remove(a.id);
-        assert_eq!(1.0490361, a_grads.data);
+        assert_eq!(
+            [1.0490362200997918, 1.0693179342794896, 1.0211069109294437],
+            a_grads.data
+        );
     }
 }

@@ -1,114 +1,97 @@
 use rust_mnist::Mnist;
-use std::io::{stdout, Write};
 
 mod gradients;
 mod network;
 mod tensor_operations;
 mod tensors;
 
-use crate::network::{Network, NetworkMode, NodeKind};
-use crate::tensors::Tensor0D;
+use crate::network::{Network, StandardClassificationNetworkHandler, StandardNetworkHandler};
+use crate::tensors::Tensor1D;
 
-const TRAINING_EPOCHS: usize = 50;
-const EXAMPLES_PER_EPOCH: usize = 10000;
 const INPUTS: usize = 784;
 const OUTPUTS: usize = 10;
-const STARTING_NODES: usize = 5000;
+const ADDITIONAL_STARTING_NODES: usize = 100;
+const BATCH_SIZE: usize = 64;
+const MAX_TRAINING_STEPS: usize = 1000000;
+const STEPS_PER_TRAINING_STEPS: usize = 100;
+const MINI_VALIDATION_STEPS: usize = 25;
+const MORPHING_PERSPECTIVE_WINDOW: usize = 15;
+const VALIDATION_STEPS: usize = 1000;
+const VALIDATION_FREQUENCY: usize = 50;
 
-fn validate(network: &mut Network, mnist: &Mnist) -> f32 {
-    let mut correct = 0;
-    for i in 0..10000 {
-        let input: Vec<Tensor0D> = mnist.test_data[i]
-            .iter()
-            .map(|x| Tensor0D::new_without_tape(*x as f32 / 255.))
-            .collect();
-        let label = mnist.test_labels[i] as usize;
-        let output = network.forward(input);
-        let guess = output
-            .into_iter()
-            .enumerate()
-            .fold((0, f32::NEG_INFINITY), |acc, (i, t)| {
-                if t.data > acc.1 {
-                    (i, t.data)
-                } else {
-                    acc
-                }
-            })
-            .0;
-        if label == guess {
-            correct += 1;
-        }
-    }
-    correct as f32 / 10000.
+struct RepeatingNetworkData<const N: usize> {
+    current_index: usize,
+    labels: Vec<u8>,
+    data: Vec<[u8; 784]>,
 }
 
-fn build_network() -> Network {
-    let mut network = Network::new();
-    for _i in 0..INPUTS {
-        network.add_node(NodeKind::Input);
+impl<const N: usize> RepeatingNetworkData<N> {
+    fn new(labels: Vec<u8>, data: Vec<[u8; 784]>) -> Self {
+        RepeatingNetworkData {
+            current_index: 0,
+            labels,
+            data,
+        }
     }
-    for _i in 0..OUTPUTS {
-        network.add_node(NodeKind::Leaf);
+}
+
+impl<const N: usize> Iterator for RepeatingNetworkData<N> {
+    type Item = (Vec<usize>, Vec<Tensor1D<N>>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let start = self.current_index;
+        let inputs: Vec<Tensor1D<N>> = (0..INPUTS)
+            .map(|i| {
+                let data: [f64; N] = (start..start + N)
+                    .map(|ii| self.data[ii][i] as f64 / 255.)
+                    .collect::<Vec<f64>>()
+                    .try_into()
+                    .unwrap();
+                Tensor1D::new_without_tape(data)
+            })
+            .collect();
+        let labels: Vec<usize> = (start..start + N)
+            .map(|i| self.labels[i] as usize)
+            .collect();
+        self.current_index += N;
+        if self.current_index + N > self.data.len() {
+            self.current_index = 0;
+        }
+        Some((labels, inputs))
     }
-    for _i in 0..STARTING_NODES {
-        network.add_node(NodeKind::Normal);
-    }
+}
+
+fn build_network<const N: usize>() -> Network<N> {
+    let mut network: Network<N> = Network::default();
+    network.add_nodes(network::NodeKind::Leaf, OUTPUTS);
+    network.add_nodes(network::NodeKind::Input, INPUTS);
+    network.add_nodes(network::NodeKind::Normal, ADDITIONAL_STARTING_NODES);
     network
 }
 
 fn main() {
+    // Load data
     let mnist = Mnist::new("data/");
+    let train_data: RepeatingNetworkData<BATCH_SIZE> =
+        RepeatingNetworkData::new(mnist.train_labels, mnist.train_data);
+    let test_data: RepeatingNetworkData<BATCH_SIZE> =
+        RepeatingNetworkData::new(mnist.test_labels, mnist.test_data);
 
-    let mut network = build_network();
-    println!("{:?}", network);
+    // Build the network
+    let network = build_network::<BATCH_SIZE>();
 
-    // Do initial validation
-    network.set_mode(NetworkMode::Inference);
-    validate(&mut network, &mnist);
-    network.set_mode(NetworkMode::Training);
+    // Build the network handler
+    let mut network_handler = StandardClassificationNetworkHandler::new(
+        network,
+        MAX_TRAINING_STEPS,
+        STEPS_PER_TRAINING_STEPS,
+        MINI_VALIDATION_STEPS,
+        Box::new(train_data),
+        Box::new(test_data),
+        MORPHING_PERSPECTIVE_WINDOW,
+        VALIDATION_STEPS,
+        VALIDATION_FREQUENCY,
+    );
 
-    for i in 0..TRAINING_EPOCHS {
-        for ii in 0..EXAMPLES_PER_EPOCH {
-            // Prep data
-            let input: Vec<Tensor0D> = mnist.train_data[ii]
-                .iter()
-                .map(|x| Tensor0D::new_without_tape(*x as f32 / 255.))
-                .collect();
-            let label = mnist.train_labels[ii] as usize;
-
-            // Forward pass
-            let output = network.forward(input);
-            let loss = Tensor0D::nll(output, label);
-            network.backward(loss);
-
-            // Print some nice things for us
-            if ii % 100 == 0 {
-                let percent_done = ii as f32 / EXAMPLES_PER_EPOCH as f32;
-                let mut progress = "#".repeat((percent_done * 100.) as usize);
-                progress += &" ".repeat(((1. - percent_done) * 100.) as usize);
-                print!(
-                    "{}{}Epoch: {} [{}] {}/{}",
-                    termion::clear::CurrentLine,
-                    termion::cursor::Left(10000),
-                    i,
-                    progress,
-                    ii,
-                    EXAMPLES_PER_EPOCH
-                );
-                stdout().flush().unwrap();
-            }
-        }
-        // Do end of epoch validation
-        network.set_mode(NetworkMode::Inference);
-        let percent_correct = validate(&mut network, &mnist);
-        network.set_mode(NetworkMode::Training);
-        print!(
-            "{}{}Epoch: {} val_percent: {}",
-            termion::clear::CurrentLine,
-            termion::cursor::Left(10000),
-            i,
-            percent_correct
-        );
-        println!();
-    }
+    // Train
+    network_handler.train();
 }
