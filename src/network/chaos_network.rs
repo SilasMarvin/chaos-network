@@ -80,8 +80,10 @@ impl<const N: usize> Network<N> {
                 let mut rng = rand::thread_rng();
                 for i in 0..count {
                     let mut sampled = HashSet::new();
-                    for _ii in 0..((self.leaves_count / 10).max(1)) {
-                        // for _ii in 0..10 {
+                    for _ii in 0..((self.leaves_count / 10).max(1))
+                        .min(10)
+                        .max(self.leaves_count)
+                    {
                         let input_node_index = distribution_between.sample(&mut rng);
                         if sampled.contains(&input_node_index) {
                             continue;
@@ -189,15 +191,15 @@ impl<const N: usize> Network<N> {
             match node.kind {
                 NodeKind::Input => {
                     let connections = self.connections_to.get(&node.id).unwrap();
-                    // let go_in = input.pop().unwrap();
-                    let go_in = &mut input.pop().unwrap()
-                        + &mut (&mut node.weights[0] * &mut Tensor1D::new_without_tape([1.; N]));
+                    let go_in = input.pop().unwrap();
+                    // let go_in = &mut input.pop().unwrap()
+                    //     + &mut (&mut node.weights[0] * &mut Tensor1D::new_without_tape([1.; N]));
                     let mut go_in = match connections.len() > 1 {
                         true => go_in.split_on_add(connections.len()),
                         _ => vec![go_in],
                     };
                     for (ii, connection) in connections.iter().enumerate() {
-                        let mut x = &mut node.weights[ii + 1] * &mut go_in.pop().unwrap();
+                        let mut x = &mut node.weights[ii] * &mut go_in.pop().unwrap();
                         let running_value = &mut running_values[*connection];
                         running_values[*connection] = running_value + &mut x;
                     }
@@ -231,14 +233,6 @@ impl<const N: usize> Network<N> {
         }
         output
     }
-
-    // pub fn morph(&mut self) {
-    //     let mut rng = rand::thread_rng();
-    //     let remove_count = rng.gen_range(0..(self.get_connection_count() as f32 * 0.025) as usize);
-    //     self.remove_connections(remove_count);
-    //     let add_count = rng.gen_range(0..(self.get_connection_count() as f32 * 0.05) as usize);
-    //     self.add_random_connections(add_count);
-    // }
 
     pub fn add_random_connections(&mut self, count: usize) {
         let mut rng = rand::thread_rng();
@@ -321,13 +315,7 @@ impl<const N: usize> Network<N> {
 impl<const N: usize> Node<N> {
     pub fn new(kind: NodeKind) -> Self {
         let new = match kind {
-            NodeKind::Leaf => Self {
-                id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
-                weights: Vec::new(),
-                kind,
-                leaf_id: LEAF_COUNT.fetch_add(1, Ordering::SeqCst),
-            },
-            _ => {
+            NodeKind::Normal => {
                 let mut node = Self {
                     id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                     weights: Vec::new(),
@@ -337,6 +325,12 @@ impl<const N: usize> Node<N> {
                 node.add_weight();
                 node
             }
+            _ => Self {
+                id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
+                weights: Vec::new(),
+                kind,
+                leaf_id: LEAF_COUNT.fetch_add(1, Ordering::SeqCst),
+            },
         };
         new
     }
