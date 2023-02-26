@@ -2,7 +2,7 @@ use crate::network::{Network, NetworkMode};
 use crate::tensors::{Tensor, Tensor1D};
 use std::boxed::Box;
 
-const MORPHING_PERSPECTIVE_WINDOWS: usize = 3;
+const MORPHING_PERSPECTIVE_WINDOWS: usize = 25;
 const EXPECTED_DIFF: f64 = 0.02;
 const MAX_MORPH_CHANGE: f64 = 0.005;
 
@@ -10,7 +10,8 @@ pub trait StandardNetworkHandler<const N: usize> {
     fn train(&mut self);
     fn train_next_batch(&mut self);
     fn validate_next_batch(&mut self) -> f64;
-    fn morph(&mut self);
+    fn grow(&mut self);
+    fn prune(&mut self);
 }
 
 pub struct StandardClassificationNetworkHandler<const N: usize> {
@@ -53,12 +54,30 @@ impl<const N: usize> StandardClassificationNetworkHandler<N> {
     }
 }
 
+#[derive(Debug)]
+enum TrainingPhase {
+    Growing,
+    Pruning,
+}
+
 impl<const N: usize> StandardNetworkHandler<N> for StandardClassificationNetworkHandler<N> {
     fn train(&mut self) {
+        let mut phase = TrainingPhase::Growing;
+        let mut current_phase_steps = 0;
         for training_step in 0..self.max_training_steps {
             // Do training
             for _mini_step in 0..self.steps_per_training_step {
                 self.train_next_batch();
+            }
+
+            // Perform phase action
+            match &phase {
+                TrainingPhase::Growing => {
+                    self.grow();
+                }
+                TrainingPhase::Pruning => {
+                    self.prune();
+                }
             }
 
             // Rapidly evaluate performance
@@ -67,8 +86,8 @@ impl<const N: usize> StandardNetworkHandler<N> for StandardClassificationNetwork
                 .sum::<f64>()
                 / (self.mini_validation_steps as f64);
             println!(
-                "Training Step: {} -> Rapid Validation Accuracy: {}",
-                training_step, average_validation_accuracy
+                "Training Step: {} | Phase: {:?} | Rapid Validation Accuracy: {}",
+                training_step, phase, average_validation_accuracy
             );
             self.past_validation_accuracy
                 .push(average_validation_accuracy);
@@ -85,8 +104,15 @@ impl<const N: usize> StandardNetworkHandler<N> for StandardClassificationNetwork
                 );
             }
 
-            // Morph
-            self.morph();
+            // Update phase count
+            current_phase_steps += 1;
+            if current_phase_steps == 25 {
+                phase = match phase {
+                    TrainingPhase::Growing => TrainingPhase::Pruning,
+                    _ => TrainingPhase::Growing,
+                };
+                current_phase_steps = 0;
+            }
         }
     }
 
@@ -124,37 +150,55 @@ impl<const N: usize> StandardNetworkHandler<N> for StandardClassificationNetwork
         (correct as f64) / N as f64
     }
 
-    fn morph(&mut self) {
+    fn grow(&mut self) {
+        // if self.past_validation_accuracy.len()
+        //     < self.morphing_perspective_window * MORPHING_PERSPECTIVE_WINDOWS
+        // {
+        //     return;
+        // }
+        //
+        // if self.network.nodes.len() > 1500 {
+        //     return;
+        // }
+
+        // A TEST WILL DEFINITELY CHANGE
+        // let morph_amount =
+        //     (EXPECTED_DIFF / self.get_current_validation_change_difference()).min(1.);
+        // let nodes_to_add =
+        //     (self.network.nodes.len() as f64 * MAX_MORPH_CHANGE * morph_amount) as usize;
+        // let connections_to_add =
+        //     (self.network.get_connection_count() as f64 * MAX_MORPH_CHANGE * morph_amount) as usize;
+        // self.network
+        //     .add_nodes(super::NodeKind::Normal, nodes_to_add);
+        // self.network.add_random_connections(connections_to_add);
+    }
+
+    fn prune(&mut self) {
         if self.past_validation_accuracy.len()
-            < self.morphing_perspective_window * MORPHING_PERSPECTIVE_WINDOWS
+            < self.morphing_perspective_window + MORPHING_PERSPECTIVE_WINDOWS
         {
             return;
         }
 
-        if self.network.nodes.len() > 1500 {
+        let average_windowed_validation_accuracy: Vec<f64> =
+            self.past_validation_accuracy[self.past_validation_accuracy.len()
+                - (self.morphing_perspective_window + MORPHING_PERSPECTIVE_WINDOWS)..]
+                .windows(self.morphing_perspective_window)
+                .map(|x| x.iter().sum::<f64>() / (x.len() as f64))
+                .collect();
+        let average_validation_accuracy_over_last_windows = average_windowed_validation_accuracy
+            [..average_windowed_validation_accuracy.len() - 1]
+            .iter()
+            .sum::<f64>()
+            / (MORPHING_PERSPECTIVE_WINDOWS as f64);
+        let current_average_validation_accuracy =
+            *average_windowed_validation_accuracy.last().unwrap();
+        if current_average_validation_accuracy < average_validation_accuracy_over_last_windows {
             return;
         }
-
-        // A TEST WILL DEFINITELY CHANGE
-        let clustered: Vec<f64> =
-            self.past_validation_accuracy[self.past_validation_accuracy.len()
-                - self.morphing_perspective_window * MORPHING_PERSPECTIVE_WINDOWS..]
-                .chunks(self.morphing_perspective_window)
-                .map(|x| x.iter().sum())
-                .collect();
-        let clustered_windows = clustered[..clustered.len() - 1].windows(2);
-        let clustered_windows_len = clustered_windows.len();
-        let past_average_change =
-            clustered_windows.map(|x| x[1] - x[0]).sum::<f64>() / (clustered_windows_len as f64);
-        let current_change = clustered[clustered.len() - 1] - clustered[clustered.len() - 2];
-        let current_change_diff = past_average_change - current_change;
-        let morph_amount = (EXPECTED_DIFF / current_change_diff).min(1.);
-        let nodes_to_add =
-            (self.network.nodes.len() as f64 * MAX_MORPH_CHANGE * morph_amount) as usize;
-        let connections_to_add =
-            (self.network.get_connection_count() as f64 * MAX_MORPH_CHANGE * morph_amount) as usize;
+        let connections_to_remove = (self.network.get_connection_count() as f64 * 0.005) as usize;
         self.network
-            .add_nodes(super::NodeKind::Normal, nodes_to_add);
-        // self.network.add_random_connections(connections_to_add);
+            .remove_weighted_connections(connections_to_remove);
+        self.network.prune_unconnected_nodes();
     }
 }

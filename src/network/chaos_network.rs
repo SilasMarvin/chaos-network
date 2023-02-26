@@ -29,6 +29,11 @@ pub enum NetworkMode {
     Inference,
 }
 
+pub enum ShiftDirection {
+    Forward,
+    Backward,
+}
+
 impl Default for NetworkMode {
     fn default() -> Self {
         Self::Inference
@@ -59,7 +64,7 @@ impl<const N: usize> Network<N> {
             NodeKind::Normal => {
                 let node_index = self.batch_insert_normal_nodes(count);
                 for i in 0..(count) {
-                    for _ii in 0..10 {
+                    for _ii in 0..1 {
                         self.add_node_connection_to(node_index + i);
                         self.add_node_connection_from(node_index + i);
                     }
@@ -71,7 +76,7 @@ impl<const N: usize> Network<N> {
                 for _i in 0..count {
                     self.nodes.insert(0, nodes.remove(0));
                 }
-                self.shift_all_connections_after(0, count);
+                self.shift_all_connections_after(0, count, ShiftDirection::Forward);
                 if self.leaves_count == 0 {
                     panic!("This should be called after leaves are added for now")
                 }
@@ -81,8 +86,8 @@ impl<const N: usize> Network<N> {
                 for i in 0..count {
                     let mut sampled = HashSet::new();
                     for _ii in 0..((self.leaves_count / 10).max(1))
-                        .min(10)
-                        .max(self.leaves_count)
+                        // .min(10)
+                        .min(self.leaves_count)
                     {
                         let input_node_index = distribution_between.sample(&mut rng);
                         if sampled.contains(&input_node_index) {
@@ -114,17 +119,45 @@ impl<const N: usize> Network<N> {
         for _i in 0..count {
             self.nodes.insert(node_index, Node::new(NodeKind::Normal));
         }
-        self.shift_all_connections_after(node_index, count);
+        self.shift_all_connections_after(node_index, count, ShiftDirection::Forward);
         node_index
     }
 
-    pub fn shift_all_connections_after(&mut self, after: usize, count: usize) {
+    pub fn shift_all_connections_after(
+        &mut self,
+        after: usize,
+        count: usize,
+        direction: ShiftDirection,
+    ) {
         for (_key, value) in self.connections_to.iter_mut() {
             value.iter_mut().for_each(|u| {
                 if *u >= after {
-                    *u += count;
+                    match direction {
+                        ShiftDirection::Forward => *u += count,
+                        ShiftDirection::Backward => *u -= count,
+                    }
                 }
             });
+        }
+    }
+
+    pub fn remove_all_connections_to(&mut self, node_index: usize) {
+        for i in 0..self.nodes.len() - self.leaves_count {
+            let connections = self.connections_to.get_mut(&self.nodes[i].id).unwrap();
+            let mut removal_adjust = 0;
+            for ii in 0..connections.len() {
+                if connections[ii - removal_adjust] == node_index {
+                    connections.remove(ii - removal_adjust);
+                    // Remove the corresponding weight, adjust for the prescence of bias if it is a
+                    // normal node
+                    if self.nodes[i].kind == NodeKind::Normal {
+                        self.nodes[i].weights.remove(ii + 1 - removal_adjust);
+                    } else {
+                        self.nodes[i].weights.remove(ii - removal_adjust);
+                    }
+                    removal_adjust += 1;
+                }
+            }
         }
     }
 
@@ -191,6 +224,9 @@ impl<const N: usize> Network<N> {
             match node.kind {
                 NodeKind::Input => {
                     let connections = self.connections_to.get(&node.id).unwrap();
+                    if connections.len() == 0 {
+                        continue;
+                    }
                     let go_in = input.pop().unwrap();
                     // let go_in = &mut input.pop().unwrap()
                     //     + &mut (&mut node.weights[0] * &mut Tensor1D::new_without_tape([1.; N]));
@@ -248,13 +284,26 @@ impl<const N: usize> Network<N> {
             .nodes
             .iter()
             .enumerate()
-            .filter(|(_i, n)| n.weights.len() > 2)
+            // This filters out inputs which we don't remove even if they have 0 connections
+            // Also filter out leaves
+            .filter(|(_i, n)| n.weights.len() > 0)
             .map(|(i, n)| {
-                n.weights
-                    .iter()
-                    .enumerate()
-                    .skip(1)
-                    .map(move |(ii, w)| (i, ii, w.data))
+                // If it is a normal node, skip over the bias weight
+                match self.nodes[i].kind {
+                    NodeKind::Normal => n
+                        .weights
+                        .iter()
+                        .enumerate()
+                        .skip(1)
+                        .map(move |(ii, w)| (i, ii, w.data))
+                        .collect::<Vec<(usize, usize, f64)>>(),
+                    _ => n
+                        .weights
+                        .iter()
+                        .enumerate()
+                        .map(move |(ii, w)| (i, ii, w.data))
+                        .collect::<Vec<(usize, usize, f64)>>(),
+                }
             })
             .flatten()
             .collect::<Vec<(usize, usize, f64)>>();
@@ -269,11 +318,37 @@ impl<const N: usize> Network<N> {
                 continue;
             }
             sampled.insert(item.0);
+            let removal_index = match self.nodes[item.0].kind {
+                NodeKind::Normal => item.1 - 1,
+                _ => item.1,
+            };
+            println!("{:?}", self.nodes[item.0]);
             self.connections_to
                 .get_mut(&self.nodes[item.0].id)
                 .unwrap()
-                .remove(item.1 - 1);
+                .remove(removal_index);
             self.nodes[item.0].weights.remove(item.1);
+        }
+    }
+
+    pub fn prune_unconnected_nodes(&mut self) {
+        let mut removal_adjust = 0;
+        for i in self.inputs_count..(self.nodes.len() - self.leaves_count) {
+            let real_i = i - removal_adjust;
+            if self
+                .connections_to
+                .get(&self.nodes[real_i].id)
+                .unwrap()
+                .len()
+                == 0
+            {
+                println!("\n\nWE FOUND A DEAD NODE\n\n");
+                self.connections_to.remove(&self.nodes[real_i].id);
+                self.nodes.remove(real_i);
+                self.remove_all_connections_to(real_i);
+                self.shift_all_connections_after(real_i, 1, ShiftDirection::Backward);
+                removal_adjust += 1;
+            }
         }
     }
 
@@ -325,7 +400,13 @@ impl<const N: usize> Node<N> {
                 node.add_weight();
                 node
             }
-            _ => Self {
+            NodeKind::Input => Self {
+                id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
+                weights: Vec::new(),
+                kind,
+                leaf_id: 0,
+            },
+            NodeKind::Leaf => Self {
                 id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                 weights: Vec::new(),
                 kind,
@@ -343,7 +424,7 @@ impl<const N: usize> Node<N> {
 
     fn apply_gradients(&mut self, gradients: &mut Gradients<N>) {
         for w in self.weights.iter_mut() {
-            let w_gradients = gradients.remove(w.id);
+            let w_gradients = gradients.remove_or_0(w.id);
             let averaged_gradients: f64 = w_gradients.data.iter().sum::<f64>() / (N as f64);
             // let update = (0.01 * averaged_gradients).min(0.1).max(-0.1);
             let update = 0.01 * averaged_gradients;

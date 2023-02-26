@@ -43,18 +43,6 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
                 new.set_tape(self.tape.clone());
             }
             (None, Some(_other_tape)) => {
-                // let new_id = new.grad_for;
-                // let other_id = other.grad_for;
-                // let self_data = self.data;
-                // other_tape.borrow_mut().add_operation((
-                //     new_id,
-                //     Box::new(move |g| {
-                //         let mut tg = g.remove(new_id);
-                //         tg.data *= self_data;
-                //         g.insert(other_id, tg);
-                //     }),
-                // ));
-                // Some(other_tape.clone())
                 panic!("Switch operator orientation");
             }
             (None, None) => (),
