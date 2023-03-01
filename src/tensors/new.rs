@@ -1,14 +1,14 @@
 use crate::gradients::Tape;
 use crate::tensors::{Tensor0D, Tensor1D};
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::RwLock;
 
 pub static TENSOR_COUNT: AtomicU64 = AtomicU64::new(0);
 
 impl<const N: usize> Tensor0D<N> {
-    pub fn new_with_tape(data: f64, tape: Option<Rc<RefCell<Tape<N>>>>) -> Self {
+    pub fn new_with_tape(data: f64, tape: Option<Arc<RwLock<Tape<N>>>>) -> Self {
         let id_grad_for = TENSOR_COUNT.fetch_add(1, Ordering::SeqCst);
         Self {
             id: id_grad_for,
@@ -30,7 +30,7 @@ impl<const N: usize> Tensor0D<N> {
 }
 
 impl<const N: usize> Tensor1D<N> {
-    pub fn new_with_tape(data: [f64; N], tape: Option<Rc<RefCell<Tape<N>>>>) -> Self {
+    pub fn new_with_tape(data: [f64; N], tape: Option<Arc<RwLock<Tape<N>>>>) -> Self {
         // let id_grad_for = u64::MAX;
         let id_grad_for = TENSOR_COUNT.fetch_add(1, Ordering::SeqCst);
         Self {

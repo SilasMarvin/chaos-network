@@ -2,12 +2,12 @@ use rand::distributions::{Uniform, WeightedIndex};
 use rand::prelude::*;
 use rand::Rng;
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::rc::Rc;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::RwLock;
 
 use crate::gradients::Gradients;
 use crate::gradients::Tape;
@@ -40,14 +40,14 @@ impl Default for NetworkMode {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct Network<const N: usize> {
     pub inputs_count: usize,
     pub leaves_count: usize,
     pub nodes: Vec<Node<N>>,
-    connections_to: HashMap<i32, Vec<usize>>,
+    pub connections_to: HashMap<i32, Vec<usize>>,
     pub mode: NetworkMode,
-    tape: Rc<RefCell<Tape<N>>>,
+    pub tape: Arc<RwLock<Tape<N>>>,
 }
 
 #[derive(Clone)]
@@ -432,7 +432,7 @@ impl<const N: usize> Node<N> {
         }
     }
 
-    fn set_mode(&mut self, mode: NetworkMode, tape: Option<Rc<RefCell<Tape<N>>>>) {
+    fn set_mode(&mut self, mode: NetworkMode, tape: Option<Arc<RwLock<Tape<N>>>>) {
         match mode {
             NetworkMode::Training => {
                 for w in self.weights.iter_mut() {

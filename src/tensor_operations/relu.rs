@@ -9,7 +9,7 @@ impl<const N: usize> Tensor1D<N> {
             let new_id = new.grad_for;
             let self_id = t.grad_for;
             let t_data = t.data.map(|x| if x > 0. { 1. } else { 0. });
-            tape.borrow_mut().add_operation((
+            tape.write().unwrap().add_operation((
                 new_id,
                 Box::new(move |g| {
                     let mut tg = g.remove(new_id);

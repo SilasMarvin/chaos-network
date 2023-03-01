@@ -17,7 +17,7 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
                 let other_id = other.grad_for;
-                self_tape.borrow_mut().add_operation((
+                self_tape.write().unwrap().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let tg1 = g.remove(new_id);
@@ -47,12 +47,12 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
 mod tests {
     use super::*;
     use crate::{gradients::Tape, tensors::Tensor};
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::RwLock;
 
     #[test]
     fn test_add_1d_dual_grad() {
-        let tape: Rc<RefCell<Tape<3>>> = Rc::new(RefCell::new(Tape::new()));
+        let tape: Arc<RwLock<Tape<3>>> = Arc::new(RwLock::new(Tape::new()));
         let mut a = Tensor1D::new_with_tape([1., 2., 3.], Some(tape.clone()));
         let mut b = Tensor1D::new_with_tape([2., 3., 4.], Some(tape.clone()));
         let mut c = &mut a + &mut b;

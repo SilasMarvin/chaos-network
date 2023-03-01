@@ -3,8 +3,6 @@ use crate::tensors::{Tensor, Tensor1D};
 use std::boxed::Box;
 
 const MORPHING_PERSPECTIVE_WINDOWS: usize = 25;
-const EXPECTED_DIFF: f64 = 0.02;
-const MAX_MORPH_CHANGE: f64 = 0.005;
 
 pub trait StandardNetworkHandler<const N: usize> {
     fn train(&mut self);
@@ -54,30 +52,12 @@ impl<const N: usize> StandardClassificationNetworkHandler<N> {
     }
 }
 
-#[derive(Debug)]
-enum TrainingPhase {
-    Growing,
-    Pruning,
-}
-
 impl<const N: usize> StandardNetworkHandler<N> for StandardClassificationNetworkHandler<N> {
     fn train(&mut self) {
-        let mut phase = TrainingPhase::Growing;
-        let mut current_phase_steps = 0;
         for training_step in 0..self.max_training_steps {
             // Do training
             for _mini_step in 0..self.steps_per_training_step {
                 self.train_next_batch();
-            }
-
-            // Perform phase action
-            match &phase {
-                TrainingPhase::Growing => {
-                    self.grow();
-                }
-                TrainingPhase::Pruning => {
-                    self.prune();
-                }
             }
 
             // Rapidly evaluate performance
@@ -86,33 +66,11 @@ impl<const N: usize> StandardNetworkHandler<N> for StandardClassificationNetwork
                 .sum::<f64>()
                 / (self.mini_validation_steps as f64);
             println!(
-                "Training Step: {} | Phase: {:?} | Rapid Validation Accuracy: {}",
-                training_step, phase, average_validation_accuracy
+                "Training Step: {} | Rapid Validation Accuracy: {}",
+                training_step, average_validation_accuracy
             );
             self.past_validation_accuracy
                 .push(average_validation_accuracy);
-
-            // Maybe perform a more thorough validation of performance
-            if training_step % self.validation_frequency == 0 {
-                let average_validation_accuracy: f64 = (0..self.validation_steps)
-                    .map(|_x| self.validate_next_batch())
-                    .sum::<f64>()
-                    / (self.validation_steps as f64);
-                println!(
-                    "\n{:?}\nThorough Validation Accuracy: {}",
-                    self.network, average_validation_accuracy
-                );
-            }
-
-            // Update phase count
-            current_phase_steps += 1;
-            if current_phase_steps == 25 {
-                phase = match phase {
-                    TrainingPhase::Growing => TrainingPhase::Pruning,
-                    _ => TrainingPhase::Growing,
-                };
-                current_phase_steps = 0;
-            }
         }
     }
 
@@ -151,26 +109,11 @@ impl<const N: usize> StandardNetworkHandler<N> for StandardClassificationNetwork
     }
 
     fn grow(&mut self) {
-        // if self.past_validation_accuracy.len()
-        //     < self.morphing_perspective_window * MORPHING_PERSPECTIVE_WINDOWS
-        // {
-        //     return;
-        // }
-        //
-        // if self.network.nodes.len() > 1500 {
-        //     return;
-        // }
-
-        // A TEST WILL DEFINITELY CHANGE
-        // let morph_amount =
-        //     (EXPECTED_DIFF / self.get_current_validation_change_difference()).min(1.);
-        // let nodes_to_add =
-        //     (self.network.nodes.len() as f64 * MAX_MORPH_CHANGE * morph_amount) as usize;
-        // let connections_to_add =
-        //     (self.network.get_connection_count() as f64 * MAX_MORPH_CHANGE * morph_amount) as usize;
-        // self.network
-        //     .add_nodes(super::NodeKind::Normal, nodes_to_add);
-        // self.network.add_random_connections(connections_to_add);
+        let nodes_to_add = (self.network.nodes.len() as f64 * 0.005) as usize;
+        let connections_to_add = (self.network.get_connection_count() as f64 * 0.005) as usize;
+        self.network
+            .add_nodes(super::NodeKind::Normal, nodes_to_add);
+        self.network.add_random_connections(connections_to_add);
     }
 
     fn prune(&mut self) {
