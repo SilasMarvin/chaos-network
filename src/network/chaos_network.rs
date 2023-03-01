@@ -1,3 +1,4 @@
+use derivative::Derivative;
 use rand::distributions::{Uniform, WeightedIndex};
 use rand::prelude::*;
 use rand::Rng;
@@ -40,7 +41,8 @@ impl Default for NetworkMode {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Derivative, Clone)]
+#[derivative(Default)]
 pub struct Network<const N: usize> {
     pub inputs_count: usize,
     pub leaves_count: usize,
@@ -48,6 +50,8 @@ pub struct Network<const N: usize> {
     connections_to: HashMap<i32, Vec<usize>>,
     pub mode: NetworkMode,
     tape: Rc<RefCell<Tape<N>>>,
+    #[derivative(Default(value = "1."))]
+    weight_multiplier: f64,
 }
 
 #[derive(Clone)]
@@ -59,12 +63,22 @@ pub struct Node<const N: usize> {
 }
 
 impl<const N: usize> Network<N> {
+    pub fn new(inputs: usize, normal_nodes: usize, outputs: usize) -> Self {
+        let mut network: Network<N> = Network::default();
+        network.add_nodes(NodeKind::Leaf, outputs);
+        network.add_nodes(NodeKind::Input, inputs);
+        network.add_nodes(NodeKind::Normal, normal_nodes);
+        // For all new added nodes and what not, we set the weight really small
+        // network.weight_multiplier = 1.;
+        network
+    }
+
     pub fn add_nodes(&mut self, kind: NodeKind, count: usize) {
         match kind {
             NodeKind::Normal => {
                 let node_index = self.batch_insert_normal_nodes(count);
                 for i in 0..(count) {
-                    for _ii in 0..1 {
+                    for _ii in 0..10 {
                         self.add_node_connection_to(node_index + i);
                         self.add_node_connection_from(node_index + i);
                     }
@@ -85,10 +99,7 @@ impl<const N: usize> Network<N> {
                 let mut rng = rand::thread_rng();
                 for i in 0..count {
                     let mut sampled = HashSet::new();
-                    for _ii in 0..((self.leaves_count / 10).max(1))
-                        // .min(10)
-                        .min(self.leaves_count)
-                    {
+                    for _ii in 0..((self.leaves_count / 10).max(10)).min(self.leaves_count) {
                         let input_node_index = distribution_between.sample(&mut rng);
                         if sampled.contains(&input_node_index) {
                             continue;
@@ -169,7 +180,7 @@ impl<const N: usize> Network<N> {
                     .insert(self.nodes[node_index].id, vec![node2_index]);
             }
         };
-        self.nodes[node_index].add_weight();
+        self.nodes[node_index].add_weight(self.weight_multiplier);
     }
 
     fn add_node_connection_to(&mut self, node_index: usize) {
@@ -322,7 +333,6 @@ impl<const N: usize> Network<N> {
                 NodeKind::Normal => item.1 - 1,
                 _ => item.1,
             };
-            println!("{:?}", self.nodes[item.0]);
             self.connections_to
                 .get_mut(&self.nodes[item.0].id)
                 .unwrap()
@@ -342,7 +352,6 @@ impl<const N: usize> Network<N> {
                 .len()
                 == 0
             {
-                println!("\n\nWE FOUND A DEAD NODE\n\n");
                 self.connections_to.remove(&self.nodes[real_i].id);
                 self.nodes.remove(real_i);
                 self.remove_all_connections_to(real_i);
@@ -397,7 +406,7 @@ impl<const N: usize> Node<N> {
                     kind,
                     leaf_id: 0,
                 };
-                node.add_weight();
+                node.add_weight(1.);
                 node
             }
             NodeKind::Input => Self {
@@ -416,9 +425,9 @@ impl<const N: usize> Node<N> {
         new
     }
 
-    pub fn add_weight(&mut self) {
+    pub fn add_weight(&mut self, weight_multiplier: f64) {
         let mut rng = rand::thread_rng();
-        let w = (rng.gen::<f64>() - 0.5) / 100.;
+        let w = ((rng.gen::<f64>() - 0.5) / 100.) * weight_multiplier;
         self.weights.push(Tensor0D::new_without_tape(w));
     }
 

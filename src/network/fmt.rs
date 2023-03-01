@@ -11,14 +11,7 @@ impl<const N: usize> fmt::Debug for Network<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "
-Network:
-    - input_nodes: {}
-    - normal nodes: {}
-    - leaves: {}
-    - connections: {}
-    - mode: {:?}
-        ",
+            "Network: [input_nodes: {}, normal_nodes: {}, leaves: {}, connections: {}, mode: {:?}]",
             self.inputs_count,
             self.nodes.len() - self.inputs_count - self.leaves_count,
             self.leaves_count,
