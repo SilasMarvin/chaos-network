@@ -1,147 +1,276 @@
 use crate::network::{Network, NetworkMode};
 use crate::tensors::{Tensor, Tensor1D};
-use std::boxed::Box;
+use rand::distributions::Uniform;
+use rand::prelude::*;
+use rayon::prelude::*;
+use std::sync::Arc;
 
-const MORPHING_PERSPECTIVE_WINDOWS: usize = 25;
+const POPULATION_SIZE: usize = 10;
 
-pub trait StandardNetworkHandler<const N: usize> {
-    fn train(&mut self);
-    fn train_next_batch(&mut self);
-    fn validate_next_batch(&mut self) -> f64;
-    fn grow(&mut self);
-    fn prune(&mut self);
+#[derive(Clone)]
+pub struct RepeatingNetworkData<const I: usize, const N: usize> {
+    labels: Vec<u8>,
+    data: Vec<[u8; I]>,
 }
 
-pub struct StandardClassificationNetworkHandler<const N: usize> {
-    network: Network<N>,
-    max_training_steps: usize,
-    steps_per_training_step: usize,
-    mini_validation_steps: usize,
-    train_data: Box<dyn Iterator<Item = (Vec<usize>, Vec<Tensor1D<N>>)>>,
-    test_data: Box<dyn Iterator<Item = (Vec<usize>, Vec<Tensor1D<N>>)>>,
-    past_validation_accuracy: Vec<f64>,
-    morphing_perspective_window: usize,
-    validation_steps: usize,
-    validation_frequency: usize,
-}
-
-impl<const N: usize> StandardClassificationNetworkHandler<N> {
-    pub fn new(
-        network: Network<N>,
-        max_training_steps: usize,
-        steps_per_training_step: usize,
-        mini_validation_steps: usize,
-        train_data: Box<dyn Iterator<Item = (Vec<usize>, Vec<Tensor1D<N>>)>>,
-        test_data: Box<dyn Iterator<Item = (Vec<usize>, Vec<Tensor1D<N>>)>>,
-        morphing_perspective_window: usize,
-        validation_steps: usize,
-        validation_frequency: usize,
-    ) -> Self {
-        Self {
-            network,
-            max_training_steps,
-            steps_per_training_step,
-            mini_validation_steps,
-            train_data,
-            test_data,
-            past_validation_accuracy: Vec::new(),
-            morphing_perspective_window,
-            validation_steps,
-            validation_frequency,
-        }
-    }
-}
-
-impl<const N: usize> StandardNetworkHandler<N> for StandardClassificationNetworkHandler<N> {
-    fn train(&mut self) {
-        for training_step in 0..self.max_training_steps {
-            // Do training
-            for _mini_step in 0..self.steps_per_training_step {
-                self.train_next_batch();
-            }
-
-            // Rapidly evaluate performance
-            let average_validation_accuracy: f64 = (0..self.mini_validation_steps)
-                .map(|_x| self.validate_next_batch())
-                .sum::<f64>()
-                / (self.mini_validation_steps as f64);
-            println!(
-                "Training Step: {} | Rapid Validation Accuracy: {}",
-                training_step, average_validation_accuracy
-            );
-            self.past_validation_accuracy
-                .push(average_validation_accuracy);
-        }
+impl<const I: usize, const N: usize> RepeatingNetworkData<I, N> {
+    pub fn new(labels: Vec<u8>, data: Vec<[u8; I]>) -> Self {
+        RepeatingNetworkData { labels, data }
     }
 
-    fn train_next_batch(&mut self) {
-        if self.network.mode != NetworkMode::Training {
-            self.network.set_mode(NetworkMode::Training);
-        }
-        let (labels, inputs) = self.train_data.next().unwrap();
-        let outputs = self.network.forward_batch(inputs);
-        let loss = &mut Tensor1D::nll(outputs, labels);
-        let grads = loss.backward();
-        self.network.apply_gradients(grads);
-    }
-
-    fn validate_next_batch(&mut self) -> f64 {
-        self.network.set_mode(NetworkMode::Inference);
-        let (labels, inputs) = self.test_data.next().unwrap();
-        let outputs = self.network.forward_batch(inputs);
-        let guesses: Vec<usize> = (0..N)
+    fn next(&self, indexes: &[usize; N]) -> (Vec<usize>, Vec<Tensor1D<N>>) {
+        let inputs: Vec<Tensor1D<N>> = (0..I)
             .map(|i| {
-                let mut max: (usize, f64) = (0, outputs[0].data[i]);
-                for ii in 0..self.network.leaves_count {
-                    if outputs[ii].data[i] > max.1 {
-                        max = (ii, outputs[ii].data[i]);
-                    }
-                }
-                max.0
+                let data: [f64; N] = indexes
+                    .iter()
+                    .map(|ii| self.data[*ii][i] as f64 / 255.)
+                    .collect::<Vec<f64>>()
+                    .try_into()
+                    .unwrap();
+                Tensor1D::new_without_tape(data)
             })
             .collect();
-        let correct = guesses
-            .iter()
-            .enumerate()
-            .filter(|(i, g)| **g == labels[*i])
-            .count();
-        (correct as f64) / N as f64
+        let labels: Vec<usize> = indexes
+            .into_iter()
+            .map(|i| self.labels[*i] as usize)
+            .collect();
+        (labels, inputs)
     }
 
-    fn grow(&mut self) {
-        let nodes_to_add = (self.network.nodes.len() as f64 * 0.005) as usize;
-        let connections_to_add = (self.network.get_connection_count() as f64 * 0.005) as usize;
-        self.network
-            .add_nodes(super::NodeKind::Normal, nodes_to_add);
-        self.network.add_random_connections(connections_to_add);
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+}
+
+pub struct StandardClassificationNetworkHandler<const I: usize, const O: usize, const N: usize> {
+    max_training_steps: usize,
+    steps_per_training_step: usize,
+    train_data: Arc<RepeatingNetworkData<I, N>>,
+    test_data: Arc<RepeatingNetworkData<I, N>>,
+    validation_steps: usize,
+}
+
+impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetworkHandler<I, O, N> {
+    pub fn new(
+        max_training_steps: usize,
+        steps_per_training_step: usize,
+        train_data: Arc<RepeatingNetworkData<I, N>>,
+        test_data: Arc<RepeatingNetworkData<I, N>>,
+        validation_steps: usize,
+    ) -> Self {
+        Self {
+            max_training_steps,
+            steps_per_training_step,
+            train_data,
+            test_data,
+            validation_steps,
+        }
+    }
+}
+
+fn grow<const N: usize>(
+    network: &mut Network<N>,
+    percent_nodes_to_add: f64,
+    percent_connections_to_add: f64,
+) {
+    let nodes_to_add = (network.nodes.len() as f64 * percent_nodes_to_add) as usize;
+    let connections_to_add =
+        (network.get_connection_count() as f64 * percent_connections_to_add) as usize;
+    network.add_nodes(super::NodeKind::Normal, nodes_to_add);
+    network.add_random_connections(connections_to_add);
+}
+
+fn prune<const N: usize>(network: &mut Network<N>, percent_connections_to_remove: f64) {
+    let connections_to_remove =
+        (network.get_connection_count() as f64 * percent_connections_to_remove) as usize;
+    network.remove_weighted_connections(connections_to_remove);
+    network.prune_unconnected_nodes();
+}
+
+fn train_next_batch<const N: usize>(
+    network: &mut Network<N>,
+    train_data: (Vec<usize>, Vec<Tensor1D<N>>),
+) {
+    if network.mode != NetworkMode::Training {
+        network.set_mode(NetworkMode::Training);
+    }
+    let (labels, inputs) = train_data;
+    let outputs = network.forward_batch(inputs);
+    let loss = &mut Tensor1D::nll(outputs, labels);
+    let grads = loss.backward();
+    network.apply_gradients(grads);
+}
+
+fn validate_next_batch<const N: usize>(
+    network: &mut Network<N>,
+    test_data: (Vec<usize>, Vec<Tensor1D<N>>),
+) -> f64 {
+    network.set_mode(NetworkMode::Inference);
+    let (labels, inputs) = test_data;
+    let outputs = network.forward_batch(inputs);
+    let guesses: Vec<usize> = (0..N)
+        .map(|i| {
+            let mut max: (usize, f64) = (0, outputs[0].data[i]);
+            for ii in 0..network.leaves_count {
+                if outputs[ii].data[i] > max.1 {
+                    max = (ii, outputs[ii].data[i]);
+                }
+            }
+            max.0
+        })
+        .collect();
+    let correct = guesses
+        .iter()
+        .enumerate()
+        .filter(|(i, g)| **g == labels[*i])
+        .count();
+    (correct as f64) / N as f64
+}
+
+impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetworkHandler<I, O, N> {
+    pub fn train(&mut self) {
+        // Create the initial population
+        let mut population: Vec<Network<N>> =
+            (0..POPULATION_SIZE).map(|_i| Network::new(I, O)).collect();
+
+        // Prep some stuff for getting random data points
+        let train_data_distribution = Uniform::from(0..self.train_data.len());
+        let test_data_distribution = Uniform::from(0..self.test_data.len());
+        let mut rng = thread_rng();
+
+        // Do the actual training
+        for training_step in 0..self.max_training_steps {
+            // Prep the random indexes
+            let train_data_random_indexes = (0..self.steps_per_training_step)
+                .map(|_i| {
+                    (0..N)
+                        .map(|_ii| train_data_distribution.sample(&mut rng))
+                        .collect::<Vec<usize>>()
+                        .try_into()
+                        .unwrap()
+                })
+                .collect::<Vec<[usize; N]>>();
+            let test_data_random_indexes = (0..self.validation_steps)
+                .map(|_i| {
+                    (0..N)
+                        .map(|_ii| test_data_distribution.sample(&mut rng))
+                        .collect::<Vec<usize>>()
+                        .try_into()
+                        .unwrap()
+                })
+                .collect::<Vec<[usize; N]>>();
+
+            // Current population and maybe new networks
+            population = if training_step != 0 && training_step % 10 == 0 {
+                let new_networks = population.iter().map(|x| x.clone()).collect();
+                let new_morphed_networks = self.train_population(
+                    new_networks,
+                    &train_data_random_indexes,
+                    &test_data_random_indexes,
+                    true,
+                );
+                println!(
+                    "New Morphed Networks: {:?}",
+                    new_morphed_networks
+                        .iter()
+                        .map(|(n, ava, score)| (*ava, *score, n.get_connection_count()))
+                        .collect::<Vec<(f64, f64, i32)>>()
+                );
+                let new_population_networks = self.train_population(
+                    population,
+                    &train_data_random_indexes,
+                    &test_data_random_indexes,
+                    false,
+                );
+                println!(
+                    "New Population Networks: {:?}",
+                    new_population_networks
+                        .iter()
+                        .map(|(n, ava, score)| (*ava, *score, n.get_connection_count()))
+                        .collect::<Vec<(f64, f64, i32)>>()
+                );
+
+                // Merge them together
+                new_population_networks
+                    .into_iter()
+                    .zip(new_morphed_networks.into_iter())
+                    .rev()
+                    .skip(POPULATION_SIZE / 2)
+                    .map(|(a, b)| vec![a.0, b.0])
+                    .flatten()
+                    .collect()
+            } else {
+                self.train_population(
+                    population,
+                    &train_data_random_indexes,
+                    &test_data_random_indexes,
+                    false,
+                )
+                .into_iter()
+                .map(|(n, _, _)| n)
+                .collect()
+            }
+        }
     }
 
-    fn prune(&mut self) {
-        if self.past_validation_accuracy.len()
-            < self.morphing_perspective_window + MORPHING_PERSPECTIVE_WINDOWS
-        {
-            return;
-        }
-
-        let average_windowed_validation_accuracy: Vec<f64> =
-            self.past_validation_accuracy[self.past_validation_accuracy.len()
-                - (self.morphing_perspective_window + MORPHING_PERSPECTIVE_WINDOWS)..]
-                .windows(self.morphing_perspective_window)
-                .map(|x| x.iter().sum::<f64>() / (x.len() as f64))
-                .collect();
-        let average_validation_accuracy_over_last_windows = average_windowed_validation_accuracy
-            [..average_windowed_validation_accuracy.len() - 1]
+    fn train_population(
+        &self,
+        population: Vec<Network<N>>,
+        train_data_random_indexes: &[[usize; N]],
+        test_data_random_indexes: &[[usize; N]],
+        do_morph: bool,
+    ) -> Vec<(Network<N>, f64, f64)> {
+        // Do the training and validation
+        let new_networks: Vec<(Network<N>, f64)> = population
+            .into_par_iter()
+            .map(|mut network| {
+                if do_morph {
+                    let mut rng = rand::thread_rng();
+                    let percent_nodes_to_add = rng.gen::<f64>() / 10.;
+                    let percent_connections_to_add = rng.gen::<f64>() / 10.;
+                    let percent_connections_to_remove = (rng.gen::<f64>() / 10.) * 3.;
+                    grow(
+                        &mut network,
+                        percent_nodes_to_add,
+                        percent_connections_to_add,
+                    );
+                    prune(&mut network, percent_connections_to_remove);
+                }
+                let train_data = self.train_data.clone();
+                let test_data = self.test_data.clone();
+                train_data_random_indexes
+                    .iter()
+                    .for_each(|train_data_random_index| {
+                        train_next_batch(&mut network, train_data.next(train_data_random_index))
+                    });
+                let average_validation_accuracy: f64 = (0..self.validation_steps)
+                    .map(|step| {
+                        validate_next_batch(
+                            &mut network,
+                            test_data.next(&test_data_random_indexes[step]),
+                        )
+                    })
+                    .sum::<f64>()
+                    / (self.validation_steps as f64);
+                (network, average_validation_accuracy)
+            })
+            .collect();
+        let network_sizes: Vec<f64> = new_networks
             .iter()
-            .sum::<f64>()
-            / (MORPHING_PERSPECTIVE_WINDOWS as f64);
-        let current_average_validation_accuracy =
-            *average_windowed_validation_accuracy.last().unwrap();
-        if current_average_validation_accuracy < average_validation_accuracy_over_last_windows {
-            return;
-        }
-        let connections_to_remove = (self.network.get_connection_count() as f64 * 0.005) as usize;
-        self.network
-            .remove_weighted_connections(connections_to_remove);
-        self.network.prune_unconnected_nodes();
+            .map(|(n, _)| n.get_connection_count() as f64)
+            .collect();
+        let min_network_size = network_sizes
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap();
+        let mut new_networks: Vec<(Network<N>, f64, f64)> = new_networks
+            .into_iter()
+            .map(|(n, ava)| {
+                let connection_count = n.get_connection_count() as f64;
+                (n, ava, ava + ((min_network_size / connection_count) * 0.05))
+            })
+            .collect();
+        new_networks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        new_networks
     }
 }

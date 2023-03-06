@@ -14,7 +14,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
                 let self_id = self.grad_for;
                 let other_id = other.grad_for;
                 let self_data = self.data;
-                let other_data = other.data.clone();
+                let other_data = other.data;
                 self_tape.write().unwrap().add_operation((
                     new_id,
                     Box::new(move |g| {
@@ -31,7 +31,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
             (Some(self_tape), None) => {
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
-                let other_data = other.data.clone();
+                let other_data = other.data;
                 self_tape.write().unwrap().add_operation((
                     new_id,
                     Box::new(move |g| {
