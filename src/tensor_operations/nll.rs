@@ -41,7 +41,7 @@ impl<const N: usize> Tensor1D<N> {
                     tracker += 1;
                     x
                 });
-                tape.borrow_mut().add_operation((
+                tape.write().unwrap().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let mut tg = g.remove(new_id);
@@ -63,15 +63,15 @@ mod tests {
     use super::*;
     use crate::gradients::Tape;
     use crate::tensors::Tensor;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::RwLock;
 
     const BATCH_SIZE: usize = 3;
 
     #[test]
     // Might need to double check this one
     fn test_nll_1d() {
-        let tape: Rc<RefCell<Tape<BATCH_SIZE>>> = Rc::new(RefCell::new(Tape::new()));
+        let tape: Arc<RwLock<Tape<BATCH_SIZE>>> = Arc::new(RwLock::new(Tape::new()));
         let a = vec![
             Tensor1D::new_with_tape([1.; 3], Some(tape.clone())),
             Tensor1D::new_with_tape([2.; 3], Some(tape.clone())),
