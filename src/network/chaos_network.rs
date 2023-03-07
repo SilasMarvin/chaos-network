@@ -2,6 +2,7 @@ use rand::distributions::{Uniform, WeightedIndex};
 use rand::prelude::*;
 use rand::Rng;
 
+use std::boxed::Box;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI32;
@@ -11,6 +12,7 @@ use std::sync::RwLock;
 
 use crate::gradients::Gradients;
 use crate::gradients::Tape;
+use crate::network::optimizers::{AdamOptimizer, Optimizer};
 use crate::tensors::{Tensor, Tensor0D, Tensor1D};
 
 pub static NODE_COUNT: AtomicI32 = AtomicI32::new(0);
@@ -52,8 +54,9 @@ pub struct Network<const N: usize> {
 #[derive(Clone)]
 pub struct Node<const N: usize> {
     pub id: i32,
-    weights: Vec<Tensor0D<N>>,
+    pub weights: Vec<Tensor0D<N>>,
     pub kind: NodeKind,
+    pub optimizer: Box<dyn Optimizer>,
 }
 
 impl<const N: usize> Network<N> {
@@ -236,8 +239,6 @@ impl<const N: usize> Network<N> {
                         if connections.is_empty() {
                             continue;
                         }
-                        // let go_in = &mut input.pop().unwrap()
-                        //     + &mut (&mut node.weights[0] * &mut Tensor1D::new_without_tape([1.; N]));
                         let mut go_in = match connections.len() > 1 {
                             true => go_in.split_on_add(connections.len()),
                             _ => vec![go_in],
@@ -251,10 +252,6 @@ impl<const N: usize> Network<N> {
                 }
                 NodeKind::Normal => {
                     let connections = self.connections_to.get(&node.id).unwrap();
-                    // let mut go_in = std::mem::replace(
-                    //     &mut running_values[i],
-                    //     Tensor1D::new_without_tape([0.; N]),
-                    // );
                     let mut go_in = &mut running_values[i]
                         + &mut (&mut node.weights[0] * &mut Tensor1D::new_without_tape([1.; N]));
                     let go_in = Tensor1D::mish(&mut go_in);
@@ -391,6 +388,7 @@ impl<const N: usize> Node<N> {
                     id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                     weights: Vec::new(),
                     kind,
+                    optimizer: Box::new(AdamOptimizer::default()),
                 };
                 node.add_weight();
                 node
@@ -399,11 +397,13 @@ impl<const N: usize> Node<N> {
                 id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                 weights: Vec::new(),
                 kind,
+                optimizer: Box::new(AdamOptimizer::default()),
             },
             NodeKind::Leaf => Self {
                 id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                 weights: Vec::new(),
                 kind,
+                optimizer: Box::new(AdamOptimizer::default()),
             },
         }
     }
@@ -419,8 +419,7 @@ impl<const N: usize> Node<N> {
             let w_gradients = gradients.remove_or_0(w.id);
             let averaged_gradients: f64 = w_gradients.data.iter().sum::<f64>() / (N as f64);
             // let update = (0.01 * averaged_gradients).min(0.1).max(-0.1);
-            let update = 0.01 * averaged_gradients;
-            w.data -= update;
+            w.data -= self.optimizer.update(averaged_gradients);
         }
     }
 

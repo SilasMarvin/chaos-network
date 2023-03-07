@@ -1,9 +1,7 @@
 use crate::gradients::Tape;
-use crate::network::Network;
+use crate::network::{Network, NetworkMode};
 use std::sync::Arc;
 use std::sync::RwLock;
-
-use super::NetworkMode;
 
 impl<const N: usize> Clone for Network<N> {
     fn clone(&self) -> Self {

@@ -5,7 +5,7 @@ use rand::prelude::*;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-const POPULATION_SIZE: usize = 10;
+const POPULATION_SIZE: usize = 32;
 
 #[derive(Clone)]
 pub struct RepeatingNetworkData<const I: usize, const N: usize> {
@@ -173,6 +173,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                     "New Morphed Networks: {:?}",
                     new_morphed_networks
                         .iter()
+                        .take(5)
                         .map(|(n, ava, score)| (*ava, *score, n.get_connection_count()))
                         .collect::<Vec<(f64, f64, i32)>>()
                 );
@@ -186,6 +187,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                     "New Population Networks: {:?}",
                     new_population_networks
                         .iter()
+                        .take(5)
                         .map(|(n, ava, score)| (*ava, *score, n.get_connection_count()))
                         .collect::<Vec<(f64, f64, i32)>>()
                 );
@@ -226,9 +228,9 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             .map(|mut network| {
                 if do_morph {
                     let mut rng = rand::thread_rng();
-                    let percent_nodes_to_add = rng.gen::<f64>() / 10.;
-                    let percent_connections_to_add = rng.gen::<f64>() / 10.;
-                    let percent_connections_to_remove = (rng.gen::<f64>() / 10.) * 3.;
+                    let percent_nodes_to_add = rng.gen::<f64>() / 25.;
+                    let percent_connections_to_add = rng.gen::<f64>() / 25.;
+                    let percent_connections_to_remove = rng.gen::<f64>() / 10.;
                     grow(
                         &mut network,
                         percent_nodes_to_add,
@@ -267,7 +269,11 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             .into_iter()
             .map(|(n, ava)| {
                 let connection_count = n.get_connection_count() as f64;
-                (n, ava, ava + ((min_network_size / connection_count) * 0.05))
+                (
+                    n,
+                    ava,
+                    ava + ((min_network_size / connection_count) * 0.025),
+                )
             })
             .collect();
         new_networks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
