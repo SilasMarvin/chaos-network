@@ -3,7 +3,6 @@ use crate::tensors::{Tensor, Tensor1D};
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use rayon::prelude::*;
-use std::sync::Arc;
 
 const POPULATION_SIZE: usize = 32;
 
@@ -45,8 +44,8 @@ impl<const I: usize, const N: usize> RepeatingNetworkData<I, N> {
 pub struct StandardClassificationNetworkHandler<const I: usize, const O: usize, const N: usize> {
     max_training_steps: usize,
     steps_per_training_step: usize,
-    train_data: Arc<RepeatingNetworkData<I, N>>,
-    test_data: Arc<RepeatingNetworkData<I, N>>,
+    train_data: RepeatingNetworkData<I, N>,
+    test_data: RepeatingNetworkData<I, N>,
     validation_steps: usize,
 }
 
@@ -54,8 +53,8 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
     pub fn new(
         max_training_steps: usize,
         steps_per_training_step: usize,
-        train_data: Arc<RepeatingNetworkData<I, N>>,
-        test_data: Arc<RepeatingNetworkData<I, N>>,
+        train_data: RepeatingNetworkData<I, N>,
+        test_data: RepeatingNetworkData<I, N>,
         validation_steps: usize,
     ) -> Self {
         Self {
@@ -89,7 +88,7 @@ fn prune<const N: usize>(network: &mut Network<N>, percent_connections_to_remove
 
 fn train_next_batch<const N: usize>(
     network: &mut Network<N>,
-    train_data: (Vec<usize>, Vec<Tensor1D<N>>),
+    train_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) {
     if network.mode != NetworkMode::Training {
         network.set_mode(NetworkMode::Training);
@@ -103,7 +102,7 @@ fn train_next_batch<const N: usize>(
 
 fn validate_next_batch<const N: usize>(
     network: &mut Network<N>,
-    test_data: (Vec<usize>, Vec<Tensor1D<N>>),
+    test_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) -> f64 {
     network.set_mode(NetworkMode::Inference);
     let (labels, inputs) = test_data;
@@ -141,34 +140,33 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
         // Do the actual training
         for training_step in 0..self.max_training_steps {
             // Prep the random indexes
-            let train_data_random_indexes = (0..self.steps_per_training_step)
+            let batch_train_data = (0..self.steps_per_training_step)
                 .map(|_i| {
-                    (0..N)
-                        .map(|_ii| train_data_distribution.sample(&mut rng))
-                        .collect::<Vec<usize>>()
-                        .try_into()
-                        .unwrap()
+                    self.train_data.next(
+                        &(0..N)
+                            .map(|_ii| train_data_distribution.sample(&mut rng))
+                            .collect::<Vec<usize>>()
+                            .try_into()
+                            .unwrap(),
+                    )
                 })
-                .collect::<Vec<[usize; N]>>();
-            let test_data_random_indexes = (0..self.validation_steps)
+                .collect::<Vec<(Vec<usize>, Vec<Tensor1D<N>>)>>();
+            let batch_test_data = (0..self.validation_steps)
                 .map(|_i| {
-                    (0..N)
-                        .map(|_ii| test_data_distribution.sample(&mut rng))
-                        .collect::<Vec<usize>>()
-                        .try_into()
-                        .unwrap()
+                    self.train_data.next(
+                        &(0..N)
+                            .map(|_ii| test_data_distribution.sample(&mut rng))
+                            .collect::<Vec<usize>>()
+                            .try_into()
+                            .unwrap(),
+                    )
                 })
-                .collect::<Vec<[usize; N]>>();
-
+                .collect::<Vec<(Vec<usize>, Vec<Tensor1D<N>>)>>();
             // Current population and maybe new networks
             population = if training_step != 0 && training_step % 10 == 0 {
                 let new_networks = population.iter().map(|x| x.clone()).collect();
-                let new_morphed_networks = self.train_population(
-                    new_networks,
-                    &train_data_random_indexes,
-                    &test_data_random_indexes,
-                    true,
-                );
+                let new_morphed_networks =
+                    self.train_population(new_networks, &batch_train_data, &batch_test_data, true);
                 println!(
                     "New Morphed Networks: {:?}",
                     new_morphed_networks
@@ -177,12 +175,8 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                         .map(|(n, ava, score)| (*ava, *score, n.get_connection_count()))
                         .collect::<Vec<(f64, f64, i32)>>()
                 );
-                let new_population_networks = self.train_population(
-                    population,
-                    &train_data_random_indexes,
-                    &test_data_random_indexes,
-                    false,
-                );
+                let new_population_networks =
+                    self.train_population(population, &batch_train_data, &batch_test_data, false);
                 println!(
                     "New Population Networks: {:?}",
                     new_population_networks
@@ -202,15 +196,10 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                     .flatten()
                     .collect()
             } else {
-                self.train_population(
-                    population,
-                    &train_data_random_indexes,
-                    &test_data_random_indexes,
-                    false,
-                )
-                .into_iter()
-                .map(|(n, _, _)| n)
-                .collect()
+                self.train_population(population, &batch_train_data, &batch_test_data, false)
+                    .into_iter()
+                    .map(|(n, _, _)| n)
+                    .collect()
             }
         }
     }
@@ -218,8 +207,8 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
     fn train_population(
         &self,
         population: Vec<Network<N>>,
-        train_data_random_indexes: &[[usize; N]],
-        test_data_random_indexes: &[[usize; N]],
+        batch_train_data: &Vec<(Vec<usize>, Vec<Tensor1D<N>>)>,
+        batch_test_data: &Vec<(Vec<usize>, Vec<Tensor1D<N>>)>,
         do_morph: bool,
     ) -> Vec<(Network<N>, f64, f64)> {
         // Do the training and validation
@@ -238,20 +227,11 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                     );
                     prune(&mut network, percent_connections_to_remove);
                 }
-                let train_data = self.train_data.clone();
-                let test_data = self.test_data.clone();
-                train_data_random_indexes
+                batch_train_data
                     .iter()
-                    .for_each(|train_data_random_index| {
-                        train_next_batch(&mut network, train_data.next(train_data_random_index))
-                    });
+                    .for_each(|batch| train_next_batch(&mut network, batch));
                 let average_validation_accuracy: f64 = (0..self.validation_steps)
-                    .map(|step| {
-                        validate_next_batch(
-                            &mut network,
-                            test_data.next(&test_data_random_indexes[step]),
-                        )
-                    })
+                    .map(|step| validate_next_batch(&mut network, &batch_test_data[step]))
                     .sum::<f64>()
                     / (self.validation_steps as f64);
                 (network, average_validation_accuracy)

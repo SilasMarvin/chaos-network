@@ -18,12 +18,10 @@ const VALIDATION_STEPS: usize = 100;
 fn main() {
     // Load data
     let mnist = Mnist::new("data/");
-    let train_data: Arc<RepeatingNetworkData<INPUTS, BATCH_SIZE>> = Arc::new(
-        RepeatingNetworkData::new(mnist.train_labels, mnist.train_data),
-    );
-    let test_data: Arc<RepeatingNetworkData<INPUTS, BATCH_SIZE>> = Arc::new(
-        RepeatingNetworkData::new(mnist.test_labels, mnist.test_data),
-    );
+    let train_data: RepeatingNetworkData<INPUTS, BATCH_SIZE> =
+        RepeatingNetworkData::new(mnist.train_labels, mnist.train_data);
+    let test_data: RepeatingNetworkData<INPUTS, BATCH_SIZE> =
+        RepeatingNetworkData::new(mnist.test_labels, mnist.test_data);
 
     // Build the network handler
     let mut network_handler: StandardClassificationNetworkHandler<INPUTS, OUTPUTS, BATCH_SIZE> =

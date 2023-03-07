@@ -225,7 +225,7 @@ impl<const N: usize> Network<N> {
         self.add_connection_between(node2_index, node_index);
     }
 
-    pub fn forward_batch(&mut self, mut input: Vec<Tensor1D<N>>) -> Vec<Tensor1D<N>> {
+    pub fn forward_batch(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N>> {
         let mut output: Vec<Tensor1D<N>> = Vec::with_capacity(self.leaves_count);
         output.resize(self.leaves_count, Tensor1D::new_without_tape([0.; N]));
         let mut running_values: Vec<Tensor1D<N>> = Vec::with_capacity(self.nodes.len());
@@ -234,17 +234,12 @@ impl<const N: usize> Network<N> {
         for (i, node) in self.nodes.iter_mut().enumerate() {
             match node.kind {
                 NodeKind::Input => {
-                    let go_in = input.pop().unwrap();
                     if let Some(connections) = self.connections_to.get(&node.id) {
                         if connections.is_empty() {
                             continue;
                         }
-                        let mut go_in = match connections.len() > 1 {
-                            true => go_in.split_on_add(connections.len()),
-                            _ => vec![go_in],
-                        };
                         for (ii, connection) in connections.iter().enumerate() {
-                            let mut x = &mut node.weights[ii] * &mut go_in.pop().unwrap();
+                            let mut x = &mut node.weights[ii] * &input[i];
                             let running_value = &mut running_values[*connection];
                             running_values[*connection] = running_value + &mut x;
                         }

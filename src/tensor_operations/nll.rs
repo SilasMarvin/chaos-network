@@ -1,7 +1,7 @@
 use crate::tensors::{element_wise_mul, Tensor1D};
 
 impl<const N: usize> Tensor1D<N> {
-    pub fn nll(t: Vec<Self>, indexes: Vec<usize>) -> Self {
+    pub fn nll(t: Vec<Self>, indexes: &Vec<usize>) -> Self {
         let sum_e = t.iter().fold([0.; N], |mut acc, t| {
             t.data
                 .iter()
@@ -78,7 +78,7 @@ mod tests {
             Tensor1D::new_with_tape([3.; 3], Some(tape.clone())),
         ];
         let ids = [a[0].id, a[1].id, a[2].id];
-        let mut b = Tensor1D::nll(a, vec![0, 1, 2]);
+        let mut b = Tensor1D::nll(a, &vec![0, 1, 2]);
         assert_eq!(2.40760596444438, b.data[0]);
         assert_eq!(1.4076059644443801, b.data[1]);
         assert_eq!(0.4076059644443803, b.data[2]);

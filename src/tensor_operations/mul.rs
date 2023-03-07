@@ -52,6 +52,35 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
     }
 }
 
+impl<'a, 'b, const N: usize> Mul<&'b Tensor1D<N>> for &'a mut Tensor0D<N> {
+    type Output = Tensor1D<N>;
+
+    fn mul(self, other: &'b Tensor1D<N>) -> Self::Output {
+        let new_data: [f64; N] = other.data.map(|d| self.data * d);
+        let mut new = Tensor1D::new_without_tape(new_data);
+
+        match &self.tape {
+            Some(self_tape) => {
+                let new_id = new.grad_for;
+                let self_id = self.grad_for;
+                let other_data = other.data;
+                self_tape.write().unwrap().add_operation((
+                    new_id,
+                    Box::new(move |g| {
+                        let mut tg = g.remove(new_id);
+                        tg.data = element_wise_mul::<N>(&tg.data, &other_data);
+                        g.insert(self_id, tg);
+                    }),
+                ));
+                new.set_tape(self.tape.clone());
+            }
+            None => (),
+        }
+
+        new
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
