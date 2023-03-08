@@ -6,6 +6,7 @@ use crate::tensors::{Tensor, Tensor1D};
 pub struct Tape<const N: usize> {
     operations: Vec<(u64, Box<dyn FnOnce(&mut Gradients<N>) + Send + Sync>)>,
     current_tensor_id: u64,
+    checkmarked_tensor_id: u64,
 }
 
 impl<const N: usize> std::fmt::Debug for Tape<N> {
@@ -20,7 +21,8 @@ impl<const N: usize> Tape<N> {
     pub fn new() -> Self {
         Self {
             operations: Vec::new(),
-            current_tensor_id: 1,
+            current_tensor_id: 0,
+            checkmarked_tensor_id: 0,
         }
     }
 
@@ -35,12 +37,17 @@ impl<const N: usize> Tape<N> {
         self.operations.len()
     }
 
+    pub fn checkmark_tensor_id(&mut self) {
+        self.checkmarked_tensor_id = self.current_tensor_id;
+    }
+
     pub fn execute(&mut self) -> Gradients<N> {
         let mut gradients: Gradients<N> = Gradients::default();
         self.operations.sort_by(|a, b| a.0.cmp(&b.0));
         for operation in self.operations.drain(..).rev() {
             (operation.1)(&mut gradients);
         }
+        self.current_tensor_id = self.checkmarked_tensor_id;
         gradients
     }
 

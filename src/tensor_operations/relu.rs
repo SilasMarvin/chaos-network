@@ -6,6 +6,7 @@ impl<const N: usize> Tensor1D<N> {
         let mut new = Tensor1D::new_with_tape(data, t.tape.clone());
 
         if let Some(tape) = &t.tape {
+            new.set_tape(Some(tape.clone()));
             let new_id = new.grad_for;
             let self_id = t.grad_for;
             let t_data = t.data.map(|x| if x > 0. { 1. } else { 0. });
@@ -17,7 +18,6 @@ impl<const N: usize> Tensor1D<N> {
                     g.insert(self_id, tg);
                 }),
             ));
-            new.set_tape(Some(tape.clone()));
         }
 
         new

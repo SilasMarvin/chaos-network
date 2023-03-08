@@ -11,9 +11,11 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
             tracker += 1;
             x
         });
+
         let mut new = Tensor1D::new_without_tape(new_data);
-        let tape = match (&self.tape, &other.tape) {
+        match (&self.tape, &other.tape) {
             (Some(self_tape), Some(_other_tape)) => {
+                new.set_tape(self.tape.clone());
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
                 let other_id = other.grad_for;
@@ -26,10 +28,9 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
                         g.insert(other_id, tg2);
                     }),
                 ));
-                self.tape.clone()
             }
             (Some(self_tape), None) => {
-                // new.grad_for = self.id;
+                new.set_tape(self.tape.clone());
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
                 self_tape.write().unwrap().add_operation((
@@ -39,10 +40,10 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
                         g.insert(self_id, tg1);
                     }),
                 ));
-                self.tape.clone()
+                // new.grad_for = self.id;
             }
             (None, Some(other_tape)) => {
-                // new.grad_for = other.id;
+                new.set_tape(other.tape.clone());
                 let new_id = new.grad_for;
                 let other_id = other.grad_for;
                 other_tape.write().unwrap().add_operation((
@@ -52,11 +53,10 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
                         g.insert(other_id, tg1);
                     }),
                 ));
-                other.tape.clone()
+                // new.grad_for = other.id;
             }
-            (None, None) => None,
-        };
-        new.set_tape(tape);
+            (None, None) => (),
+        }
 
         new
     }

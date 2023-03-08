@@ -208,6 +208,7 @@ impl<const N: usize> Network<N> {
     }
 
     pub fn forward_batch(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N>> {
+        self.tape.write().unwrap().checkmark_tensor_id();
         let mut output: Vec<Tensor1D<N>> = Vec::with_capacity(self.leaves_count);
         output.resize(self.leaves_count, Tensor1D::new_without_tape([0.; N]));
         let mut running_values: Vec<Tensor1D<N>> = Vec::with_capacity(self.nodes.len());
@@ -444,8 +445,9 @@ impl<const N: usize> Node<N> {
     }
 
     pub fn set_tape(&mut self, tape: Arc<RwLock<Tape<N>>>) {
+        self.tape = tape;
         self.weights
             .iter_mut()
-            .for_each(|x| x.set_tape(Some(tape.clone())));
+            .for_each(|x| x.set_tape(Some(self.tape.clone())));
     }
 }

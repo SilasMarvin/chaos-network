@@ -194,6 +194,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             } else {
                 self.train_population(population, &batch_train_data, &batch_test_data, false)
                     .into_iter()
+                    // .inspect(|(_, ava, _)| println!("{}", ava))
                     .map(|(n, _, _)| n)
                     .collect()
             }

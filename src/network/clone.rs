@@ -13,7 +13,7 @@ impl<const N: usize> Clone for Network<N> {
             tape: Arc::new(RwLock::new(Tape::new())),
         };
         // This handles removing the reference to the previous networks tape from nodes
-        x.set_tape(self.tape.clone());
+        x.set_tape(x.tape.clone());
         x
     }
 }

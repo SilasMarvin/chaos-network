@@ -10,6 +10,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
 
         match (&self.tape, &other.tape) {
             (Some(self_tape), Some(_other_tape)) => {
+                new.set_tape(self.tape.clone());
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
                 let other_id = other.grad_for;
@@ -26,9 +27,9 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
                         g.insert(other_id, tg2);
                     }),
                 ));
-                new.set_tape(self.tape.clone());
             }
             (Some(self_tape), None) => {
+                new.set_tape(self.tape.clone());
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
                 let other_data = other.data;
@@ -40,7 +41,6 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
                         g.insert(self_id, tg);
                     }),
                 ));
-                new.set_tape(self.tape.clone());
             }
             (None, Some(_other_tape)) => {
                 panic!("Switch operator order");
@@ -61,6 +61,7 @@ impl<'a, 'b, const N: usize> Mul<&'b Tensor1D<N>> for &'a mut Tensor0D<N> {
 
         match &self.tape {
             Some(self_tape) => {
+                new.set_tape(self.tape.clone());
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
                 let other_data = other.data;
@@ -72,7 +73,6 @@ impl<'a, 'b, const N: usize> Mul<&'b Tensor1D<N>> for &'a mut Tensor0D<N> {
                         g.insert(self_id, tg);
                     }),
                 ));
-                new.set_tape(self.tape.clone());
             }
             None => (),
         }

@@ -30,6 +30,9 @@ impl<const N: usize> Tensor1D<N> {
         let mut new = Tensor1D::new_without_tape(losses);
         for (i, tensor) in t.into_iter().enumerate() {
             if let Some(tape) = &tensor.tape {
+                if matches!(new.tape, None) {
+                    new.set_tape(Some(tape.clone()));
+                }
                 let new_id = new.grad_for;
                 let self_id = tensor.grad_for;
                 let mut tracker = 0;
@@ -49,9 +52,6 @@ impl<const N: usize> Tensor1D<N> {
                         g.insert(self_id, tg);
                     }),
                 ));
-                if matches!(new.tape, None) {
-                    new.set_tape(Some(tape.clone()));
-                }
             }
         }
         new
