@@ -28,6 +28,11 @@ impl<const N: usize> Tensor1D<N> {
 
         new
     }
+
+    pub fn mish_no_grad(t: &Self) -> Self {
+        let data = t.data.map(|x| x * ((1. + x.exp()).ln()).tanh());
+        Tensor1D::new_without_tape(data)
+    }
 }
 
 #[cfg(test)]

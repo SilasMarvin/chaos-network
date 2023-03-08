@@ -1,4 +1,4 @@
-use crate::network::{Network, NetworkMode};
+use crate::network::Network;
 use crate::tensors::{Tensor, Tensor1D};
 use rand::distributions::Uniform;
 use rand::prelude::*;
@@ -90,9 +90,6 @@ fn train_next_batch<const N: usize>(
     network: &mut Network<N>,
     train_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) {
-    if network.mode != NetworkMode::Training {
-        network.set_mode(NetworkMode::Training);
-    }
     let (labels, inputs) = train_data;
     let outputs = network.forward_batch(inputs);
     let loss = &mut Tensor1D::nll(outputs, labels);
@@ -104,9 +101,8 @@ fn validate_next_batch<const N: usize>(
     network: &mut Network<N>,
     test_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) -> f64 {
-    network.set_mode(NetworkMode::Inference);
     let (labels, inputs) = test_data;
-    let outputs = network.forward_batch(inputs);
+    let outputs = network.forward_batch_no_grad(inputs);
     let guesses: Vec<usize> = (0..N)
         .map(|i| {
             let mut max: (usize, f64) = (0, outputs[0].data[i]);
@@ -252,7 +248,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                 (
                     n,
                     ava,
-                    ava + ((min_network_size / connection_count) * 0.025),
+                    ava + ((min_network_size / connection_count) * 0.021),
                 )
             })
             .collect();

@@ -81,6 +81,15 @@ impl<'a, 'b, const N: usize> Mul<&'b Tensor1D<N>> for &'a mut Tensor0D<N> {
     }
 }
 
+impl<'a, 'b, const N: usize> Mul<&'b Tensor1D<N>> for &'a Tensor0D<N> {
+    type Output = Tensor1D<N>;
+
+    fn mul(self, other: &'b Tensor1D<N>) -> Self::Output {
+        let new_data: [f64; N] = other.data.map(|d| self.data * d);
+        Tensor1D::new_without_tape(new_data)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

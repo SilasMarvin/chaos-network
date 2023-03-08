@@ -43,6 +43,20 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
     }
 }
 
+impl<'a, 'b, const N: usize> Add<&'b Tensor1D<N>> for &'a Tensor1D<N> {
+    type Output = Tensor1D<N>;
+
+    fn add(self, other: &'b Tensor1D<N>) -> Self::Output {
+        let mut tracker = 0;
+        let new_data: [f64; N] = self.data.map(|a| {
+            let x = a + other.data[tracker];
+            tracker += 1;
+            x
+        });
+        Tensor1D::new_without_tape(new_data)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
