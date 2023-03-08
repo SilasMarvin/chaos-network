@@ -2,13 +2,10 @@ use rustc_hash::FxHashMap;
 
 use crate::tensors::{Tensor, Tensor1D};
 
-// fn translate_range(x: u64, allowed_min: u64, allowed_max: u64, min: u64, max: u64) -> u64 {
-//     (allowed_max) * (x - min) / (max - min)
-// }
-
 #[derive(Default)]
 pub struct Tape<const N: usize> {
     operations: Vec<(u64, Box<dyn FnOnce(&mut Gradients<N>) + Send + Sync>)>,
+    current_tensor_id: u64,
 }
 
 impl<const N: usize> std::fmt::Debug for Tape<N> {
@@ -23,6 +20,7 @@ impl<const N: usize> Tape<N> {
     pub fn new() -> Self {
         Self {
             operations: Vec::new(),
+            current_tensor_id: 1,
         }
     }
 
@@ -40,20 +38,21 @@ impl<const N: usize> Tape<N> {
     pub fn execute(&mut self) -> Gradients<N> {
         let mut gradients: Gradients<N> = Gradients::default();
         self.operations.sort_by(|a, b| a.0.cmp(&b.0));
-        // gradients.min = self.operations.first().unwrap().0;
-        // gradients.max = self.operations.last().unwrap().0;
         for operation in self.operations.drain(..).rev() {
             (operation.1)(&mut gradients);
         }
         gradients
+    }
+
+    pub fn register_and_set_id(&mut self) -> u64 {
+        self.current_tensor_id += 1;
+        self.current_tensor_id
     }
 }
 
 #[derive(Debug)]
 pub struct Gradients<const N: usize> {
     pub grads: FxHashMap<u64, Tensor1D<N>>,
-    // min: u64,
-    // max: u64,
 }
 
 impl<const N: usize> Gradients<N> {
@@ -78,8 +77,6 @@ impl<const N: usize> Default for Gradients<N> {
     fn default() -> Self {
         Self {
             grads: FxHashMap::default(),
-            // min: 0,
-            // max: 0,
         }
     }
 }

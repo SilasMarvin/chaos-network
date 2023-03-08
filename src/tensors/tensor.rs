@@ -8,14 +8,6 @@ pub trait Tensor<const N: usize> {
     fn backward(&mut self) -> Gradients<N>;
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>);
     fn clear_tape(&mut self);
-    // fn add(self, other: Self) -> Self;
-    // fn sub(self, other: Self) -> Self;
-    // // fn add_scalar(self, other: f64) -> Self;
-    // fn sub_scalar(self, other: f64) -> Self;
-    // fn mul(self, other: Self) -> Self;
-    // fn mul_scalar(self, other: f64) -> Self;
-    // fn square(self) -> Self;
-    // fn dot(self, other: Self) -> Tensor0D;
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +39,18 @@ impl<const N: usize> Tensor<N> for Tensor0D<N> {
     }
 
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
-        self.tape = tape;
+        match tape {
+            Some(t) => {
+                let id_grad_for = t.write().unwrap().register_and_set_id();
+                self.id = id_grad_for;
+                self.grad_for = id_grad_for;
+                self.tape = Some(t)
+            }
+            None => {
+                self.tape = None;
+                self.id = 0;
+            }
+        }
     }
 
     fn clear_tape(&mut self) {
@@ -68,7 +71,18 @@ impl<const N: usize> Tensor<N> for Tensor1D<N> {
     }
 
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
-        self.tape = tape;
+        match tape {
+            Some(t) => {
+                let id_grad_for = t.write().unwrap().register_and_set_id();
+                self.id = id_grad_for;
+                self.grad_for = id_grad_for;
+                self.tape = Some(t)
+            }
+            None => {
+                self.tape = None;
+                self.id = 0;
+            }
+        }
     }
 
     fn clear_tape(&mut self) {

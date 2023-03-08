@@ -1,4 +1,4 @@
-use crate::tensors::Tensor1D;
+use crate::tensors::{Tensor, Tensor1D};
 use std::ops::Add;
 
 impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
@@ -12,7 +12,7 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
             x
         });
         let mut new = Tensor1D::new_without_tape(new_data);
-        new.tape = match (&self.tape, &other.tape) {
+        let tape = match (&self.tape, &other.tape) {
             (Some(self_tape), Some(_other_tape)) => {
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
@@ -28,16 +28,35 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
                 ));
                 self.tape.clone()
             }
-            (Some(_self_tape), None) => {
-                new.grad_for = self.id;
+            (Some(self_tape), None) => {
+                // new.grad_for = self.id;
+                let new_id = new.grad_for;
+                let self_id = self.grad_for;
+                self_tape.write().unwrap().add_operation((
+                    new_id,
+                    Box::new(move |g| {
+                        let tg1 = g.remove(new_id);
+                        g.insert(self_id, tg1);
+                    }),
+                ));
                 self.tape.clone()
             }
-            (None, Some(_other_tape)) => {
-                new.grad_for = other.id;
+            (None, Some(other_tape)) => {
+                // new.grad_for = other.id;
+                let new_id = new.grad_for;
+                let other_id = other.grad_for;
+                other_tape.write().unwrap().add_operation((
+                    new_id,
+                    Box::new(move |g| {
+                        let tg1 = g.remove(new_id);
+                        g.insert(other_id, tg1);
+                    }),
+                ));
                 other.tape.clone()
             }
             (None, None) => None,
         };
+        new.set_tape(tape);
 
         new
     }

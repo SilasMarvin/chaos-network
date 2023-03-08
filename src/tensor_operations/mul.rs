@@ -43,7 +43,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
                 new.set_tape(self.tape.clone());
             }
             (None, Some(_other_tape)) => {
-                panic!("Switch operator orientation");
+                panic!("Switch operator order");
             }
             (None, None) => (),
         }

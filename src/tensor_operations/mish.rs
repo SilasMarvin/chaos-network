@@ -9,7 +9,7 @@ fn do_mish_backward(x: f64) -> f64 {
 impl<const N: usize> Tensor1D<N> {
     pub fn mish(t: &mut Self) -> Self {
         let data = t.data.map(|x| x * ((1. + x.exp()).ln()).tanh());
-        let mut new = Tensor1D::new_with_tape(data, t.tape.clone());
+        let new = Tensor1D::new_with_tape(data, t.tape.clone());
 
         if let Some(tape) = &t.tape {
             let new_id = new.grad_for;
@@ -23,7 +23,6 @@ impl<const N: usize> Tensor1D<N> {
                     g.insert(self_id, tg);
                 }),
             ));
-            new.tape = Some(tape.clone());
         }
 
         new

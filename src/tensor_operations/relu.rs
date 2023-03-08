@@ -1,4 +1,4 @@
-use crate::tensors::{element_wise_mul, Tensor1D};
+use crate::tensors::{element_wise_mul, Tensor, Tensor1D};
 
 impl<const N: usize> Tensor1D<N> {
     pub fn relu(t: &mut Self) -> Self {
@@ -17,7 +17,7 @@ impl<const N: usize> Tensor1D<N> {
                     g.insert(self_id, tg);
                 }),
             ));
-            new.tape = Some(tape.clone());
+            new.set_tape(Some(tape.clone()));
         }
 
         new

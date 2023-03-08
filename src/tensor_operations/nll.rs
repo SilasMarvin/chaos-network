@@ -1,4 +1,4 @@
-use crate::tensors::{element_wise_mul, Tensor1D};
+use crate::tensors::{element_wise_mul, Tensor, Tensor1D};
 
 impl<const N: usize> Tensor1D<N> {
     pub fn nll(t: Vec<Self>, indexes: &Vec<usize>) -> Self {
@@ -50,7 +50,7 @@ impl<const N: usize> Tensor1D<N> {
                     }),
                 ));
                 if matches!(new.tape, None) {
-                    new.tape = Some(tape.clone());
+                    new.set_tape(Some(tape.clone()));
                 }
             }
         }
