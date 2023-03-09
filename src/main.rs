@@ -61,8 +61,5 @@ fn main() {
         );
 
     // Train
-    let now = std::time::Instant::now();
     network_handler.train();
-    let elapsed_time = now.elapsed();
-    println!("Running training took {} seconds.", elapsed_time.as_secs());
 }

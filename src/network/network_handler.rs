@@ -162,7 +162,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             population = if training_step != 0 && training_step % 10 == 0 {
                 let new_networks = population.iter().map(|x| x.clone()).collect();
                 let new_morphed_networks =
-                    self.train_population(new_networks, &batch_train_data, &batch_test_data, false);
+                    self.train_population(new_networks, &batch_train_data, &batch_test_data, true);
                 println!(
                     "New Morphed Networks: {:?}",
                     new_morphed_networks
@@ -214,9 +214,9 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             .map(|mut network| {
                 if do_morph {
                     let mut rng = rand::thread_rng();
-                    let percent_nodes_to_add = rng.gen::<f64>() / 25.;
-                    let percent_connections_to_add = rng.gen::<f64>() / 25.;
-                    let percent_connections_to_remove = rng.gen::<f64>() / 10.;
+                    let percent_nodes_to_add = rng.gen::<f64>() / 50.;
+                    let percent_connections_to_add = rng.gen::<f64>() / 50.;
+                    let percent_connections_to_remove = rng.gen::<f64>() / 25.;
                     grow(
                         &mut network,
                         percent_nodes_to_add,
@@ -249,7 +249,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                 (
                     n,
                     ava,
-                    ava + ((min_network_size / connection_count) * 0.021),
+                    ava + ((min_network_size / connection_count) * 0.025),
                 )
             })
             .collect();

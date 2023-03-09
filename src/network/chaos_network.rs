@@ -81,9 +81,8 @@ impl<const N: usize> Network<N> {
                 let distribution_between =
                     Uniform::from(self.nodes.len() - self.leaves_count..self.nodes.len());
                 let mut rng = rand::thread_rng();
-                // let odds_of_being_picked = 100. / (count as f64);
-                let odds_of_being_picked = 1.0;
-                for i in 0..1000 {
+                let odds_of_being_picked = (count as f64 * 0.1) / (count as f64);
+                for i in 0..count {
                     if odds_of_being_picked > rng.gen::<f64>() {
                         let input_node_index = distribution_between.sample(&mut rng);
                         self.add_connection_between(i, input_node_index);
