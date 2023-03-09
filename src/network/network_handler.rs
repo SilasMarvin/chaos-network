@@ -159,6 +159,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                 })
                 .collect::<Vec<(Vec<usize>, Vec<Tensor1D<N>>)>>();
             // Current population and maybe new networks
+            // TODO: Change this back
             // population = if training_step != 0 && training_step % 10 == 0 {
             population = if false {
                 let new_networks = population.iter().map(|x| x.clone()).collect();
