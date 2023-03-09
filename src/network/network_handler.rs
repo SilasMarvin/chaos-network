@@ -4,7 +4,7 @@ use rand::distributions::Uniform;
 use rand::prelude::*;
 use rayon::prelude::*;
 
-const POPULATION_SIZE: usize = 64;
+const POPULATION_SIZE: usize = 1;
 
 #[derive(Clone)]
 pub struct RepeatingNetworkData<const I: usize, const N: usize> {
@@ -159,7 +159,8 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                 })
                 .collect::<Vec<(Vec<usize>, Vec<Tensor1D<N>>)>>();
             // Current population and maybe new networks
-            population = if training_step != 0 && training_step % 10 == 0 {
+            // population = if training_step != 0 && training_step % 10 == 0 {
+            population = if false {
                 let new_networks = population.iter().map(|x| x.clone()).collect();
                 let new_morphed_networks =
                     self.train_population(new_networks, &batch_train_data, &batch_test_data, true);
@@ -194,7 +195,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             } else {
                 self.train_population(population, &batch_train_data, &batch_test_data, false)
                     .into_iter()
-                    // .inspect(|(_, ava, _)| println!("{}", ava))
+                    .inspect(|(_, ava, _)| println!("{}", ava))
                     .map(|(n, _, _)| n)
                     .collect()
             }
