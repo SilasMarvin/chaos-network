@@ -7,21 +7,22 @@ pub trait Tensor<const N: usize> {
     fn default_without_tape() -> Self;
     fn backward(&mut self) -> Gradients<N>;
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>);
+    fn set_tape_no_id(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>);
     fn clear_tape(&mut self);
 }
 
 #[derive(Debug, Clone)]
 pub struct Tensor0D<const N: usize> {
-    pub id: u64,
-    pub grad_for: u64,
+    pub id: usize,
+    pub grad_for: usize,
     pub data: f64,
     pub tape: Option<Arc<RwLock<Tape<N>>>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Tensor1D<const N: usize> {
-    pub id: u64,
-    pub grad_for: u64,
+    pub id: usize,
+    pub grad_for: usize,
     pub data: [f64; N],
     pub tape: Option<Arc<RwLock<Tape<N>>>>,
 }
@@ -51,6 +52,10 @@ impl<const N: usize> Tensor<N> for Tensor0D<N> {
                 self.id = 0;
             }
         }
+    }
+
+    fn set_tape_no_id(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
+        self.tape = tape;
     }
 
     fn clear_tape(&mut self) {
@@ -83,6 +88,10 @@ impl<const N: usize> Tensor<N> for Tensor1D<N> {
                 self.id = 0;
             }
         }
+    }
+
+    fn set_tape_no_id(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
+        self.tape = tape;
     }
 
     fn clear_tape(&mut self) {
