@@ -4,7 +4,7 @@ use rand::distributions::Uniform;
 use rand::prelude::*;
 use rayon::prelude::*;
 
-const POPULATION_SIZE: usize = 32;
+const POPULATION_SIZE: usize = 64;
 
 #[derive(Clone)]
 pub struct RepeatingNetworkData<const I: usize, const N: usize> {
@@ -246,11 +246,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             .into_iter()
             .map(|(n, ava)| {
                 let connection_count = n.get_connection_count() as f64;
-                (
-                    n,
-                    ava,
-                    ava + ((min_network_size / connection_count) * 0.025),
-                )
+                (n, ava, ava + ((min_network_size / connection_count) * 0.05))
             })
             .collect();
         new_networks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());

@@ -10,7 +10,7 @@ use crate::network::{RepeatingNetworkData, StandardClassificationNetworkHandler}
 const INPUTS: usize = 3072;
 const OUTPUTS: usize = 10;
 const BATCH_SIZE: usize = 32;
-const MAX_TRAINING_STEPS: usize = 50;
+const MAX_TRAINING_STEPS: usize = 1000000;
 const STEPS_PER_TRAINING_STEPS: usize = 500;
 const VALIDATION_STEPS: usize = 100;
 

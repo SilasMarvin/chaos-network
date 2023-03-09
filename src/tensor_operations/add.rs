@@ -29,30 +29,12 @@ impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
                     }),
                 ));
             }
-            (Some(self_tape), None) => {
+            (Some(_self_tape), None) => {
                 new.set_tape_no_id(self.tape.clone());
-                // let new_id = new.grad_for;
-                // let self_id = self.grad_for;
-                // self_tape.write().unwrap().add_operation((
-                //     new_id,
-                //     Box::new(move |g| {
-                //         let tg1 = g.remove(new_id);
-                //         g.insert(self_id, tg1);
-                //     }),
-                // ));
                 new.grad_for = self.id;
             }
-            (None, Some(other_tape)) => {
+            (None, Some(_other_tape)) => {
                 new.set_tape_no_id(other.tape.clone());
-                // let new_id = new.grad_for;
-                // let other_id = other.grad_for;
-                // other_tape.write().unwrap().add_operation((
-                //     new_id,
-                //     Box::new(move |g| {
-                //         let tg1 = g.remove(new_id);
-                //         g.insert(other_id, tg1);
-                //     }),
-                // ));
                 new.grad_for = other.id;
             }
             (None, None) => (),
