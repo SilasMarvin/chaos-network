@@ -212,7 +212,9 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
     ) -> Vec<(Network<N>, f64, f64)> {
         // Do the training and validation
         let new_networks: Vec<(Network<N>, f64)> = population
-            .into_par_iter()
+            // TODO: Change this back
+            // .into_par_iter()
+            .into_iter()
             .map(|mut network| {
                 if do_morph {
                     let mut rng = rand::thread_rng();

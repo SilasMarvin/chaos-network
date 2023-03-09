@@ -10,7 +10,7 @@ use crate::network::{RepeatingNetworkData, StandardClassificationNetworkHandler}
 const INPUTS: usize = 3072;
 const OUTPUTS: usize = 10;
 const BATCH_SIZE: usize = 32;
-const MAX_TRAINING_STEPS: usize = 1000000;
+const MAX_TRAINING_STEPS: usize = 50;
 const STEPS_PER_TRAINING_STEPS: usize = 500;
 const VALIDATION_STEPS: usize = 100;
 
@@ -61,5 +61,8 @@ fn main() {
         );
 
     // Train
+    let now = std::time::Instant::now();
     network_handler.train();
+    let elapsed_time = now.elapsed();
+    println!("Elapsed: {:?} seconds", elapsed_time.as_secs());
 }
