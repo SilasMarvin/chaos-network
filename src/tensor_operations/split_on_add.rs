@@ -12,7 +12,7 @@ impl<const N: usize> Tensor1D<N> {
                     let old_self_id = self.grad_for;
                     // For each split elment grab their gradients, and the parent gradients, and
                     // add them together
-                    t.tape.as_mut().unwrap().write().unwrap().add_operation((
+                    t.tape.as_mut().unwrap().write().add_operation((
                         self_id,
                         Box::new(move |g| {
                             let tg = g.remove(self_id);

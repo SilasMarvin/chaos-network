@@ -15,7 +15,7 @@ impl<const N: usize> Tensor1D<N> {
             let new_id = new.grad_for;
             let self_id = t.grad_for;
             let t_data = t.data.map(do_mish_backward);
-            tape.write().unwrap().add_operation((
+            tape.write().add_operation((
                 new_id,
                 Box::new(move |g| {
                     let mut tg = g.remove(new_id);
@@ -38,8 +38,8 @@ impl<const N: usize> Tensor1D<N> {
 mod tests {
     use super::*;
     use crate::{gradients::Tape, tensors::Tensor};
+    use parking_lot::RwLock;
     use std::sync::Arc;
-    use std::sync::RwLock;
 
     #[test]
     fn test_mish_1d() {
@@ -52,6 +52,7 @@ mod tests {
             b.data
         );
         // Check gradients
+        tape.write().checkmark_tensor_id();
         let mut grads = b.backward();
         let a_grads = grads.remove(a.id);
         assert_eq!(

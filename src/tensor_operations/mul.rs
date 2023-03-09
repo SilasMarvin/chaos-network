@@ -16,7 +16,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
                 let other_id = other.grad_for;
                 let self_data = self.data;
                 let other_data = other.data;
-                self_tape.write().unwrap().add_operation((
+                self_tape.write().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let mut tg1 = g.remove(new_id);
@@ -33,7 +33,7 @@ impl<'a, 'b, const N: usize> Mul<&'b mut Tensor1D<N>> for &'a mut Tensor0D<N> {
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
                 let other_data = other.data;
-                self_tape.write().unwrap().add_operation((
+                self_tape.write().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let mut tg = g.remove(new_id);
@@ -65,7 +65,7 @@ impl<'a, 'b, const N: usize> Mul<&'b Tensor1D<N>> for &'a mut Tensor0D<N> {
                 let new_id = new.grad_for;
                 let self_id = self.grad_for;
                 let other_data = other.data;
-                self_tape.write().unwrap().add_operation((
+                self_tape.write().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let mut tg = g.remove(new_id);
@@ -94,8 +94,8 @@ impl<'a, 'b, const N: usize> Mul<&'b Tensor1D<N>> for &'a Tensor0D<N> {
 mod tests {
     use super::*;
     use crate::{gradients::Tape, tensors::Tensor};
+    use parking_lot::RwLock;
     use std::sync::Arc;
-    use std::sync::RwLock;
 
     #[test]
     fn test_mul_1d() {
@@ -106,6 +106,7 @@ mod tests {
         // Check value match
         assert_eq!([2., 4., 6.], c.data);
         // Check gradients
+        tape.write().checkmark_tensor_id();
         let mut grads = c.backward();
         let a_grads = grads.remove(a.grad_for);
         assert_eq!([1., 2., 3.], a_grads.data);
@@ -120,6 +121,7 @@ mod tests {
         // Check value match
         assert_eq!([2., 4., 6.], c.data);
         // Check gradients
+        tape.write().checkmark_tensor_id();
         let mut grads = c.backward();
         let a_grads = grads.remove(a.grad_for);
         assert_eq!([1., 2., 3.], a_grads.data);

@@ -1,5 +1,5 @@
+use parking_lot::RwLock;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use crate::gradients::{Gradients, Tape};
 
@@ -34,15 +34,22 @@ impl<const N: usize> Tensor<N> for Tensor0D<N> {
 
     fn backward(&mut self) -> Gradients<N> {
         match &mut self.tape.take() {
-            Some(tape) => tape.write().unwrap().execute(),
-            None => Gradients::default(),
+            Some(tape) => tape.write().execute(),
+            None => panic!("Calling backwards on a tensor that does not have a tape"),
         }
+        // match &mut self.tape.take() {
+        //     Some(tape) => match tape.write() {
+        //         Ok(mut t) => t.execute(),
+        //         Err(_e) => panic!("Error unwrapping tape"),
+        //     },
+        //     None => panic!("Calling backwards on a tensor that does not have a tape"),
+        // }
     }
 
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
         match tape {
             Some(t) => {
-                let id_grad_for = t.write().unwrap().register_and_set_id();
+                let id_grad_for = t.write().register_and_set_id();
                 self.id = id_grad_for;
                 self.grad_for = id_grad_for;
                 self.tape = Some(t)
@@ -70,15 +77,15 @@ impl<const N: usize> Tensor<N> for Tensor1D<N> {
 
     fn backward(&mut self) -> Gradients<N> {
         match &mut self.tape.take() {
-            Some(tape) => tape.write().unwrap().execute(),
-            None => Gradients::default(),
+            Some(tape) => tape.write().execute(),
+            None => panic!("Calling backwards on a tensor that does not have a tape"),
         }
     }
 
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
         match tape {
             Some(t) => {
-                let id_grad_for = t.write().unwrap().register_and_set_id();
+                let id_grad_for = t.write().register_and_set_id();
                 self.id = id_grad_for;
                 self.grad_for = id_grad_for;
                 self.tape = Some(t)

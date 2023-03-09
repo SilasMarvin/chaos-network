@@ -2,13 +2,12 @@ use rand::distributions::{Uniform, WeightedIndex};
 use rand::prelude::*;
 use rand::Rng;
 
+use parking_lot::RwLock;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::boxed::Box;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use crate::gradients::Gradients;
 use crate::gradients::Tape;
@@ -34,7 +33,7 @@ pub struct Network<const N: usize> {
     pub inputs_count: usize,
     pub leaves_count: usize,
     pub nodes: Vec<Node<N>>,
-    pub connections_to: HashMap<i32, Vec<usize>>,
+    pub connections_to: FxHashMap<i32, Vec<usize>>,
     pub tape: Arc<RwLock<Tape<N>>>,
 }
 
@@ -210,7 +209,7 @@ impl<const N: usize> Network<N> {
     }
 
     pub fn forward_batch(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N>> {
-        self.tape.write().unwrap().checkmark_tensor_id();
+        self.tape.write().checkmark_tensor_id();
         let mut output: Vec<Tensor1D<N>> = Vec::with_capacity(self.leaves_count);
         output.resize(self.leaves_count, Tensor1D::new_without_tape([0.; N]));
         let mut running_values: Vec<Tensor1D<N>> = Vec::with_capacity(self.nodes.len());
@@ -340,7 +339,7 @@ impl<const N: usize> Network<N> {
             return;
         }
         let weighted = WeightedIndex::new(weights.iter().map(|w| w.2.powi(2) + 1.0)).unwrap();
-        let mut sampled = HashSet::new();
+        let mut sampled = FxHashSet::default();
         for _i in 0..count {
             let item = weights[weighted.sample(&mut rng)];
             if sampled.contains(&item.0) {

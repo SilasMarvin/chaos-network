@@ -1,7 +1,7 @@
 use crate::gradients::Tape;
 use crate::network::Network;
+use parking_lot::RwLock;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 impl<const N: usize> Clone for Network<N> {
     fn clone(&self) -> Self {

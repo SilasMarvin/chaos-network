@@ -44,7 +44,7 @@ impl<const N: usize> Tensor1D<N> {
                     tracker += 1;
                     x
                 });
-                tape.write().unwrap().add_operation((
+                tape.write().add_operation((
                     new_id,
                     Box::new(move |g| {
                         let mut tg = g.remove(new_id);
@@ -63,8 +63,8 @@ mod tests {
     use super::*;
     use crate::gradients::Tape;
     use crate::tensors::Tensor;
+    use parking_lot::RwLock;
     use std::sync::Arc;
-    use std::sync::RwLock;
 
     const BATCH_SIZE: usize = 3;
 
@@ -82,6 +82,7 @@ mod tests {
         assert_eq!(2.40760596444438, b.data[0]);
         assert_eq!(1.4076059644443801, b.data[1]);
         assert_eq!(0.4076059644443803, b.data[2]);
+        tape.write().checkmark_tensor_id();
         let mut grads = b.backward();
         let a_0_grads = grads.remove(ids[0]);
         let a_1_grads = grads.remove(ids[1]);
