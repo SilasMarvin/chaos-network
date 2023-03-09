@@ -1,5 +1,3 @@
-use rustc_hash::FxHashMap;
-
 use crate::tensors::{Tensor, Tensor1D};
 
 #[derive(Default)]
@@ -43,6 +41,9 @@ impl<const N: usize> Tape<N> {
 
     pub fn execute(&mut self) -> Gradients<N> {
         let mut gradients: Gradients<N> = Gradients::default();
+        if gradients.grads.len() < self.operation_count() * 2 {
+            gradients.grads.resize(self.operations.len() * 3, None);
+        }
         self.operations.sort_by(|a, b| a.0.cmp(&b.0));
         for operation in self.operations.drain(..).rev() {
             (operation.1)(&mut gradients);
@@ -59,31 +60,35 @@ impl<const N: usize> Tape<N> {
 
 #[derive(Debug)]
 pub struct Gradients<const N: usize> {
-    pub grads: FxHashMap<u64, Tensor1D<N>>,
+    // pub grads: FxHashMap<u64, Tensor1D<N>>,
+    pub grads: Vec<Option<Tensor1D<N>>>,
 }
 
 impl<const N: usize> Gradients<N> {
     pub fn remove(&mut self, id: u64) -> Tensor1D<N> {
-        self.grads
-            .remove(&id)
-            .unwrap_or(Tensor1D::default_without_tape())
+        let grads = std::mem::replace(&mut self.grads[id as usize], None);
+        match grads {
+            Some(g) => g,
+            None => Tensor1D::default_without_tape(),
+        }
     }
 
     pub fn remove_or_0(&mut self, id: u64) -> Tensor1D<N> {
-        self.grads
-            .remove(&id)
-            .unwrap_or(Tensor1D::new_without_tape([0.; N]))
+        let grads = std::mem::replace(&mut self.grads[id as usize], None);
+        match grads {
+            Some(g) => g,
+            None => Tensor1D::new_without_tape([0.; N]),
+        }
     }
 
     pub fn insert(&mut self, key: u64, tensor: Tensor1D<N>) {
-        self.grads.insert(key, tensor);
+        self.grads[key as usize] = Some(tensor);
+        // self.grads.insert(key, tensor);
     }
 }
 
 impl<const N: usize> Default for Gradients<N> {
     fn default() -> Self {
-        Self {
-            grads: FxHashMap::default(),
-        }
+        Self { grads: Vec::new() }
     }
 }

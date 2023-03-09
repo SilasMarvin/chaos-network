@@ -101,25 +101,26 @@ fn validate_next_batch<const N: usize>(
     network: &mut Network<N>,
     test_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) -> f64 {
-    let (labels, inputs) = test_data;
-    let outputs = network.forward_batch_no_grad(inputs);
-    let guesses: Vec<usize> = (0..N)
-        .map(|i| {
-            let mut max: (usize, f64) = (0, outputs[0].data[i]);
-            for ii in 0..network.leaves_count {
-                if outputs[ii].data[i] > max.1 {
-                    max = (ii, outputs[ii].data[i]);
-                }
-            }
-            max.0
-        })
-        .collect();
-    let correct = guesses
-        .iter()
-        .enumerate()
-        .filter(|(i, g)| **g == labels[*i])
-        .count();
-    (correct as f64) / N as f64
+    // let (labels, inputs) = test_data;
+    // let outputs = network.forward_batch_no_grad(inputs);
+    // let guesses: Vec<usize> = (0..N)
+    //     .map(|i| {
+    //         let mut max: (usize, f64) = (0, outputs[0].data[i]);
+    //         for ii in 0..network.leaves_count {
+    //             if outputs[ii].data[i] > max.1 {
+    //                 max = (ii, outputs[ii].data[i]);
+    //             }
+    //         }
+    //         max.0
+    //     })
+    //     .collect();
+    // let correct = guesses
+    //     .iter()
+    //     .enumerate()
+    //     .filter(|(i, g)| **g == labels[*i])
+    //     .count();
+    // (correct as f64) / N as f64
+    0.
 }
 
 impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetworkHandler<I, O, N> {
