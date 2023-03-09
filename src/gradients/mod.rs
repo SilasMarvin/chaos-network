@@ -92,7 +92,10 @@ impl<const N: usize> Gradients<N> {
     }
 
     pub fn insert(&mut self, key: usize, tensor: Tensor1D<N>) {
-        self.grads[key] = Some(tensor);
+        // Super fast insert
+        unsafe {
+            *self.grads.get_unchecked_mut(key) = Some(tensor);
+        }
     }
 }
 
