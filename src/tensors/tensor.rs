@@ -7,29 +7,22 @@ pub trait Tensor<const N: usize> {
     fn default_without_tape() -> Self;
     fn backward(&mut self) -> Gradients<N>;
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>);
+    fn set_tape_no_id(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>);
     fn clear_tape(&mut self);
-    // fn add(self, other: Self) -> Self;
-    // fn sub(self, other: Self) -> Self;
-    // // fn add_scalar(self, other: f64) -> Self;
-    // fn sub_scalar(self, other: f64) -> Self;
-    // fn mul(self, other: Self) -> Self;
-    // fn mul_scalar(self, other: f64) -> Self;
-    // fn square(self) -> Self;
-    // fn dot(self, other: Self) -> Tensor0D;
 }
 
 #[derive(Debug, Clone)]
 pub struct Tensor0D<const N: usize> {
-    pub id: u64,
-    pub grad_for: u64,
+    pub id: usize,
+    pub grad_for: usize,
     pub data: f64,
     pub tape: Option<Arc<RwLock<Tape<N>>>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Tensor1D<const N: usize> {
-    pub id: u64,
-    pub grad_for: u64,
+    pub id: usize,
+    pub grad_for: usize,
     pub data: [f64; N],
     pub tape: Option<Arc<RwLock<Tape<N>>>>,
 }
@@ -47,6 +40,21 @@ impl<const N: usize> Tensor<N> for Tensor0D<N> {
     }
 
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
+        match tape {
+            Some(t) => {
+                let id_grad_for = t.write().unwrap().register_and_set_id();
+                self.id = id_grad_for;
+                self.grad_for = id_grad_for;
+                self.tape = Some(t)
+            }
+            None => {
+                self.tape = None;
+                self.id = 0;
+            }
+        }
+    }
+
+    fn set_tape_no_id(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
         self.tape = tape;
     }
 
@@ -68,6 +76,21 @@ impl<const N: usize> Tensor<N> for Tensor1D<N> {
     }
 
     fn set_tape(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
+        match tape {
+            Some(t) => {
+                let id_grad_for = t.write().unwrap().register_and_set_id();
+                self.id = id_grad_for;
+                self.grad_for = id_grad_for;
+                self.tape = Some(t)
+            }
+            None => {
+                self.tape = None;
+                self.id = 0;
+            }
+        }
+    }
+
+    fn set_tape_no_id(&mut self, tape: Option<Arc<RwLock<Tape<N>>>>) {
         self.tape = tape;
     }
 

@@ -24,21 +24,9 @@ pub enum NodeKind {
     Leaf,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NetworkMode {
-    Training,
-    Inference,
-}
-
 pub enum ShiftDirection {
     Forward,
     Backward,
-}
-
-impl Default for NetworkMode {
-    fn default() -> Self {
-        Self::Inference
-    }
 }
 
 #[derive(Default)]
@@ -47,7 +35,6 @@ pub struct Network<const N: usize> {
     pub leaves_count: usize,
     pub nodes: Vec<Node<N>>,
     pub connections_to: HashMap<i32, Vec<usize>>,
-    pub mode: NetworkMode,
     pub tape: Arc<RwLock<Tape<N>>>,
 }
 
@@ -57,6 +44,7 @@ pub struct Node<const N: usize> {
     pub weights: Vec<Tensor0D<N>>,
     pub kind: NodeKind,
     pub optimizer: Box<dyn Optimizer>,
+    pub tape: Arc<RwLock<Tape<N>>>,
 }
 
 impl<const N: usize> Network<N> {
@@ -80,7 +68,9 @@ impl<const N: usize> Network<N> {
             }
             NodeKind::Input => {
                 self.inputs_count += count;
-                let mut nodes: Vec<Node<N>> = (0..count).map(|_i| Node::new(kind)).collect();
+                let mut nodes: Vec<Node<N>> = (0..count)
+                    .map(|_i| Node::new(kind, self.tape.clone()))
+                    .collect();
                 for _i in 0..count {
                     self.nodes.insert(0, nodes.remove(0));
                 }
@@ -91,27 +81,18 @@ impl<const N: usize> Network<N> {
                 let distribution_between =
                     Uniform::from(self.nodes.len() - self.leaves_count..self.nodes.len());
                 let mut rng = rand::thread_rng();
-                let odds_of_being_picked = 100. / (count as f64);
+                let odds_of_being_picked = (count as f64 * 0.1) / (count as f64);
                 for i in 0..count {
                     if odds_of_being_picked > rng.gen::<f64>() {
                         let input_node_index = distribution_between.sample(&mut rng);
                         self.add_connection_between(i, input_node_index);
                     }
-                    // let mut sampled = HashSet::new();
-                    // for _ii in 0..(self.leaves_count / 10).max(10) {
-                    //     let input_node_index = distribution_between.sample(&mut rng);
-                    //     if sampled.contains(&input_node_index) {
-                    //         continue;
-                    //     }
-                    //     sampled.insert(input_node_index);
-                    //     self.add_connection_between(i, input_node_index);
-                    // }
                 }
             }
             NodeKind::Leaf => {
                 self.leaves_count += count;
                 for _i in 0..count {
-                    self.nodes.push(Node::new(kind));
+                    self.nodes.push(Node::new(kind, self.tape.clone()));
                 }
             }
         }
@@ -127,7 +108,8 @@ impl<const N: usize> Network<N> {
             self.inputs_count
         };
         for _i in 0..count {
-            self.nodes.insert(node_index, Node::new(NodeKind::Normal));
+            self.nodes
+                .insert(node_index, Node::new(NodeKind::Normal, self.tape.clone()));
         }
         self.shift_all_connections_after(node_index, count, ShiftDirection::Forward);
         node_index
@@ -226,6 +208,7 @@ impl<const N: usize> Network<N> {
     }
 
     pub fn forward_batch(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N>> {
+        self.tape.write().unwrap().checkmark_tensor_id();
         let mut output: Vec<Tensor1D<N>> = Vec::with_capacity(self.leaves_count);
         output.resize(self.leaves_count, Tensor1D::new_without_tape([0.; N]));
         let mut running_values: Vec<Tensor1D<N>> = Vec::with_capacity(self.nodes.len());
@@ -258,6 +241,49 @@ impl<const N: usize> Network<N> {
                         let mut x = &mut node.weights[ii + 1] * &mut go_in.pop().unwrap();
                         let running_value = &mut running_values[*connection];
                         running_values[*connection] = running_value + &mut x;
+                    }
+                }
+                NodeKind::Leaf => {
+                    output[nodes_len - i - 1] = std::mem::replace(
+                        &mut running_values[i],
+                        Tensor1D::new_without_tape([0.; N]),
+                    );
+                }
+            }
+        }
+        output
+    }
+
+    // Same as forward_batch above, but uses the & impl of add and mul
+    pub fn forward_batch_no_grad(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N>> {
+        let mut output: Vec<Tensor1D<N>> = Vec::with_capacity(self.leaves_count);
+        output.resize(self.leaves_count, Tensor1D::new_without_tape([0.; N]));
+        let mut running_values: Vec<Tensor1D<N>> = Vec::with_capacity(self.nodes.len());
+        running_values.resize(self.nodes.len(), Tensor1D::new_without_tape([0.; N]));
+        let nodes_len = self.nodes.len();
+        for (i, node) in self.nodes.iter_mut().enumerate() {
+            match node.kind {
+                NodeKind::Input => {
+                    if let Some(connections) = self.connections_to.get(&node.id) {
+                        if connections.is_empty() {
+                            continue;
+                        }
+                        for (ii, connection) in connections.iter().enumerate() {
+                            let x = &node.weights[ii] * &input[i];
+                            let running_value = &running_values[*connection];
+                            running_values[*connection] = running_value + &x;
+                        }
+                    }
+                }
+                NodeKind::Normal => {
+                    let connections = self.connections_to.get(&node.id).unwrap();
+                    let go_in = &running_values[i]
+                        + &(&node.weights[0] * &Tensor1D::new_without_tape([1.; N]));
+                    let go_in = Tensor1D::mish_no_grad(&go_in);
+                    for (ii, connection) in connections.iter().enumerate() {
+                        let x = &node.weights[ii + 1] * &go_in;
+                        let running_value = &running_values[*connection];
+                        running_values[*connection] = running_value + &x;
                     }
                 }
                 NodeKind::Leaf => {
@@ -357,26 +383,22 @@ impl<const N: usize> Network<N> {
         }
     }
 
-    pub fn set_mode(&mut self, mode: NetworkMode) {
-        self.mode = mode;
-        for n in self.nodes.iter_mut() {
-            if mode == NetworkMode::Training {
-                n.set_mode(mode, Some(self.tape.clone()));
-            } else {
-                n.set_mode(mode, None);
-            }
-        }
-    }
-
     pub fn get_connection_count(&self) -> i32 {
         self.connections_to
             .iter()
             .fold(0, |acc, (_key, value)| acc + value.len() as i32)
     }
+
+    pub fn set_tape(&mut self, tape: Arc<RwLock<Tape<N>>>) {
+        self.tape = tape;
+        self.nodes
+            .iter_mut()
+            .for_each(|n| n.set_tape(self.tape.clone()));
+    }
 }
 
 impl<const N: usize> Node<N> {
-    pub fn new(kind: NodeKind) -> Self {
+    pub fn new(kind: NodeKind, tape: Arc<RwLock<Tape<N>>>) -> Self {
         match kind {
             NodeKind::Normal => {
                 let mut node = Self {
@@ -384,6 +406,7 @@ impl<const N: usize> Node<N> {
                     weights: Vec::new(),
                     kind,
                     optimizer: Box::new(AdamOptimizer::default()),
+                    tape,
                 };
                 node.add_weight();
                 node
@@ -393,12 +416,14 @@ impl<const N: usize> Node<N> {
                 weights: Vec::new(),
                 kind,
                 optimizer: Box::new(AdamOptimizer::default()),
+                tape,
             },
             NodeKind::Leaf => Self {
                 id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                 weights: Vec::new(),
                 kind,
                 optimizer: Box::new(AdamOptimizer::default()),
+                tape,
             },
         }
     }
@@ -406,7 +431,8 @@ impl<const N: usize> Node<N> {
     pub fn add_weight(&mut self) {
         let mut rng = rand::thread_rng();
         let w = (rng.gen::<f64>() - 0.5) / 100.;
-        self.weights.push(Tensor0D::new_without_tape(w));
+        self.weights
+            .push(Tensor0D::new_with_tape(w, Some(self.tape.clone())));
     }
 
     fn apply_gradients(&mut self, gradients: &mut Gradients<N>) {
@@ -418,18 +444,10 @@ impl<const N: usize> Node<N> {
         }
     }
 
-    fn set_mode(&mut self, mode: NetworkMode, tape: Option<Arc<RwLock<Tape<N>>>>) {
-        match mode {
-            NetworkMode::Training => {
-                for w in self.weights.iter_mut() {
-                    w.set_tape(tape.clone());
-                }
-            }
-            NetworkMode::Inference => {
-                for w in self.weights.iter_mut() {
-                    w.clear_tape();
-                }
-            }
-        }
+    pub fn set_tape(&mut self, tape: Arc<RwLock<Tape<N>>>) {
+        self.tape = tape;
+        self.weights
+            .iter_mut()
+            .for_each(|x| x.set_tape(Some(self.tape.clone())));
     }
 }

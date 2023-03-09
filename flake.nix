@@ -23,6 +23,8 @@
             {
               nativeBuildInputs = [ pkgs.bashInteractive ];
               buildInputs = with pkgs; [
+                pkg-config
+                openssl
                 cargo-flamegraph
               ];
             };

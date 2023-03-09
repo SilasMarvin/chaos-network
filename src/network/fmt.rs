@@ -17,13 +17,11 @@ Network:
     - normal nodes: {}
     - leaves: {}
     - connections: {}
-    - mode: {:?}
         ",
             self.inputs_count,
             self.nodes.len() - self.inputs_count - self.leaves_count,
             self.leaves_count,
             self.get_connection_count(),
-            self.mode
         )
     }
 }

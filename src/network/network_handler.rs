@@ -1,4 +1,4 @@
-use crate::network::{Network, NetworkMode};
+use crate::network::Network;
 use crate::tensors::{Tensor, Tensor1D};
 use rand::distributions::Uniform;
 use rand::prelude::*;
@@ -90,9 +90,6 @@ fn train_next_batch<const N: usize>(
     network: &mut Network<N>,
     train_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) {
-    if network.mode != NetworkMode::Training {
-        network.set_mode(NetworkMode::Training);
-    }
     let (labels, inputs) = train_data;
     let outputs = network.forward_batch(inputs);
     let loss = &mut Tensor1D::nll(outputs, labels);
@@ -104,9 +101,8 @@ fn validate_next_batch<const N: usize>(
     network: &mut Network<N>,
     test_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) -> f64 {
-    network.set_mode(NetworkMode::Inference);
     let (labels, inputs) = test_data;
-    let outputs = network.forward_batch(inputs);
+    let outputs = network.forward_batch_no_grad(inputs);
     let guesses: Vec<usize> = (0..N)
         .map(|i| {
             let mut max: (usize, f64) = (0, outputs[0].data[i]);
@@ -198,6 +194,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             } else {
                 self.train_population(population, &batch_train_data, &batch_test_data, false)
                     .into_iter()
+                    // .inspect(|(_, ava, _)| println!("{}", ava))
                     .map(|(n, _, _)| n)
                     .collect()
             }
@@ -217,9 +214,9 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
             .map(|mut network| {
                 if do_morph {
                     let mut rng = rand::thread_rng();
-                    let percent_nodes_to_add = rng.gen::<f64>() / 25.;
-                    let percent_connections_to_add = rng.gen::<f64>() / 25.;
-                    let percent_connections_to_remove = rng.gen::<f64>() / 10.;
+                    let percent_nodes_to_add = rng.gen::<f64>() / 50.;
+                    let percent_connections_to_add = rng.gen::<f64>() / 50.;
+                    let percent_connections_to_remove = rng.gen::<f64>() / 25.;
                     grow(
                         &mut network,
                         percent_nodes_to_add,
