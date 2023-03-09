@@ -440,8 +440,10 @@ impl<const N: usize> Node<N> {
         for w in self.weights.iter_mut() {
             let w_gradients = gradients.remove_or_0(w.id);
             let averaged_gradients: f64 = w_gradients.data.iter().sum::<f64>() / (N as f64);
-            // let update = (0.01 * averaged_gradients).min(0.1).max(-0.1);
-            w.data -= self.optimizer.update(averaged_gradients);
+            if averaged_gradients != 0. {
+                // w.data -= 0.01 * averaged_gradients;
+                w.data -= self.optimizer.update(averaged_gradients);
+            }
         }
     }
 
