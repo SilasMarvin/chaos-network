@@ -1,4 +1,5 @@
 use crate::tensors::{Tensor, Tensor1D};
+use rustc_hash::FxHashMap;
 
 #[derive(Default)]
 pub struct Tape<const N: usize> {
@@ -40,10 +41,7 @@ impl<const N: usize> Tape<N> {
     }
 
     pub fn execute(&mut self) -> Gradients<N> {
-        let mut gradients: Gradients<N> = Gradients::default();
-        if gradients.grads.len() < self.operation_count() * 2 {
-            gradients.grads.resize(self.operations.len() * 2, None);
-        }
+        let mut gradients = Gradients::default();
         self.operations.sort_by(|a, b| a.0.cmp(&b.0));
         for operation in self.operations.drain(..).rev() {
             (operation.1)(&mut gradients);
@@ -60,35 +58,31 @@ impl<const N: usize> Tape<N> {
 
 #[derive(Debug)]
 pub struct Gradients<const N: usize> {
-    // pub grads: FxHashMap<usize, Tensor1D<N>>,
-    pub grads: Vec<Option<Tensor1D<N>>>,
+    pub grads: FxHashMap<usize, Tensor1D<N>>,
 }
 
 impl<const N: usize> Gradients<N> {
     pub fn remove(&mut self, id: usize) -> Tensor1D<N> {
-        let grads = std::mem::take(&mut self.grads[id]);
-        match grads {
-            Some(g) => g,
-            None => Tensor1D::default_without_tape(),
-        }
+        self.grads
+            .remove(&id)
+            .unwrap_or(Tensor1D::default_without_tape())
     }
 
     pub fn remove_or_0(&mut self, id: usize) -> Tensor1D<N> {
-        let grads = std::mem::take(&mut self.grads[id]);
-        match grads {
-            Some(g) => g,
-            None => Tensor1D::new_without_tape([0.; N]),
-        }
+        self.grads
+            .remove(&id)
+            .unwrap_or(Tensor1D::new_without_tape([0.; N]))
     }
 
     pub fn insert(&mut self, key: usize, tensor: Tensor1D<N>) {
-        self.grads[key] = Some(tensor);
-        // self.grads.insert(key, tensor);
+        self.grads.insert(key, tensor);
     }
 }
 
 impl<const N: usize> Default for Gradients<N> {
     fn default() -> Self {
-        Self { grads: Vec::new() }
+        Self {
+            grads: FxHashMap::default(),
+        }
     }
 }
