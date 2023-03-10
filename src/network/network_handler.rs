@@ -1,5 +1,6 @@
 use crate::network::Network;
-use crate::tensors::{Tensor, Tensor1D};
+use crate::tensor_operations::Tensor1DNll;
+use crate::tensors::Tensor1D;
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use rayon::prelude::*;
@@ -26,7 +27,7 @@ impl<const I: usize, const N: usize> RepeatingNetworkData<I, N> {
                     .collect::<Vec<f64>>()
                     .try_into()
                     .unwrap();
-                Tensor1D::new_without_tape(data)
+                Tensor1D::new(data)
             })
             .collect();
         let labels: Vec<usize> = indexes
@@ -92,9 +93,8 @@ fn train_next_batch<const N: usize>(
 ) {
     let (labels, inputs) = train_data;
     let outputs = network.forward_batch(inputs);
-    let loss = &mut Tensor1D::nll(outputs, labels);
-    let grads = loss.backward();
-    network.apply_gradients(grads);
+    let _loss = &mut Tensor1D::nll(outputs, labels, &mut network.tape);
+    network.execute_and_apply_gradients();
 }
 
 fn validate_next_batch<const N: usize>(
