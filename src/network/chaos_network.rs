@@ -390,6 +390,7 @@ impl<const N: usize> Network<N> {
                 NodeKind::Normal => item.1 - 1,
                 _ => item.1,
             };
+            // NOTE Removing done here
             self.connections_to
                 .get_mut(&self.nodes[item.0].id)
                 .unwrap()
