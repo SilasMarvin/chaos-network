@@ -2,18 +2,16 @@ use rand::distributions::{Uniform, WeightedIndex};
 use rand::prelude::*;
 use rand::Rng;
 
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::boxed::Box;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::sync::RwLock;
 
 use crate::gradients::Gradients;
 use crate::gradients::Tape;
 use crate::network::optimizers::{AdamOptimizer, Optimizer};
-use crate::tensors::{Tensor, Tensor0D, Tensor1D};
+use crate::tensor_operations::{Tensor0DMul, Tensor1DAdd, Tensor1DMish, Tensor1DSplitOnAdd};
+use crate::tensors::{Tensor0D, Tensor1D, WithTape, WithoutTape};
 
 pub static NODE_COUNT: AtomicI32 = AtomicI32::new(0);
 
@@ -34,17 +32,16 @@ pub struct Network<const N: usize> {
     pub inputs_count: usize,
     pub leaves_count: usize,
     pub nodes: Vec<Node<N>>,
-    pub connections_to: HashMap<i32, Vec<usize>>,
-    pub tape: Arc<RwLock<Tape<N>>>,
+    pub connections_to: FxHashMap<i32, Vec<usize>>,
+    pub tape: Tape<N>,
 }
 
 #[derive(Clone)]
 pub struct Node<const N: usize> {
     pub id: i32,
-    pub weights: Vec<Tensor0D<N>>,
+    pub weights: Vec<Tensor0D<N, WithTape>>,
     pub kind: NodeKind,
     pub optimizer: Box<dyn Optimizer>,
-    pub tape: Arc<RwLock<Tape<N>>>,
 }
 
 impl<const N: usize> Network<N> {
@@ -69,7 +66,7 @@ impl<const N: usize> Network<N> {
             NodeKind::Input => {
                 self.inputs_count += count;
                 let mut nodes: Vec<Node<N>> = (0..count)
-                    .map(|_i| Node::new(kind, self.tape.clone()))
+                    .map(|_i| Node::new(kind, &mut self.tape))
                     .collect();
                 for _i in 0..count {
                     self.nodes.insert(0, nodes.remove(0));
@@ -82,7 +79,7 @@ impl<const N: usize> Network<N> {
                     Uniform::from(self.nodes.len() - self.leaves_count..self.nodes.len());
                 let mut rng = rand::thread_rng();
                 let odds_of_being_picked = (count as f64 * 0.1) / (count as f64);
-                for i in 0..count {
+                for i in 0..1000 {
                     if odds_of_being_picked > rng.gen::<f64>() {
                         let input_node_index = distribution_between.sample(&mut rng);
                         self.add_connection_between(i, input_node_index);
@@ -92,7 +89,7 @@ impl<const N: usize> Network<N> {
             NodeKind::Leaf => {
                 self.leaves_count += count;
                 for _i in 0..count {
-                    self.nodes.push(Node::new(kind, self.tape.clone()));
+                    self.nodes.push(Node::new(kind, &mut self.tape));
                 }
             }
         }
@@ -109,7 +106,7 @@ impl<const N: usize> Network<N> {
         };
         for _i in 0..count {
             self.nodes
-                .insert(node_index, Node::new(NodeKind::Normal, self.tape.clone()));
+                .insert(node_index, Node::new(NodeKind::Normal, &mut self.tape));
         }
         self.shift_all_connections_after(node_index, count, ShiftDirection::Forward);
         node_index
@@ -161,7 +158,7 @@ impl<const N: usize> Network<N> {
                     .insert(self.nodes[node_index].id, vec![node2_index]);
             }
         };
-        self.nodes[node_index].add_weight();
+        self.nodes[node_index].add_weight(&mut self.tape);
     }
 
     fn add_node_connection_to(&mut self, node_index: usize) {
@@ -207,12 +204,11 @@ impl<const N: usize> Network<N> {
         self.add_connection_between(node2_index, node_index);
     }
 
-    pub fn forward_batch(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N>> {
-        self.tape.write().unwrap().checkmark_tensor_id();
-        let mut output: Vec<Tensor1D<N>> = Vec::with_capacity(self.leaves_count);
-        output.resize(self.leaves_count, Tensor1D::new_without_tape([0.; N]));
-        let mut running_values: Vec<Tensor1D<N>> = Vec::with_capacity(self.nodes.len());
-        running_values.resize(self.nodes.len(), Tensor1D::new_without_tape([0.; N]));
+    pub fn forward_batch(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N, WithTape>> {
+        let mut output: Vec<Tensor1D<N, WithTape>> = Vec::new();
+        output.resize(self.leaves_count, Tensor1D::new([0.; N]));
+        let mut running_values: Vec<Option<Tensor1D<N, WithTape>>> = Vec::new();
+        running_values.resize(self.nodes.len(), None);
         let nodes_len = self.nodes.len();
         for (i, node) in self.nodes.iter_mut().enumerate() {
             match node.kind {
@@ -222,44 +218,68 @@ impl<const N: usize> Network<N> {
                             continue;
                         }
                         for (ii, connection) in connections.iter().enumerate() {
-                            let mut x = &mut node.weights[ii] * &input[i];
+                            let mut x =
+                                node.weights[ii].mul_left_by_reference(&input[i], &mut self.tape);
                             let running_value = &mut running_values[*connection];
-                            running_values[*connection] = running_value + &mut x;
+                            running_values[*connection] = match running_value {
+                                Some(rv) => Some(x.add(rv, &mut self.tape)),
+                                None => Some(x),
+                            }
                         }
                     }
                 }
                 NodeKind::Normal => {
                     let connections = self.connections_to.get(&node.id).unwrap();
-                    let mut go_in = &mut running_values[i]
-                        + &mut (&mut node.weights[0] * &mut Tensor1D::new_without_tape([1.; N]));
-                    let go_in = Tensor1D::mish(&mut go_in);
+                    let running_value = &mut running_values[i];
+                    let mut go_in = match running_value.as_mut() {
+                        Some(mut rv) => {
+                            let mut bias = node.weights[0].mul_left_by_reference(
+                                &mut Tensor1D::<N, WithoutTape>::new([1.; N]),
+                                &mut self.tape,
+                            );
+                            bias.add(&mut rv, &mut self.tape)
+                        }
+                        None => Tensor0DMul::mul(
+                            &mut node.weights[i],
+                            &mut Tensor1D::<N, WithoutTape>::new([1.; N]),
+                            &mut self.tape,
+                        ),
+                    };
+                    let go_in = go_in.mish(&mut self.tape);
                     let mut go_in = match connections.len() > 1 {
-                        true => go_in.split_on_add(connections.len()),
+                        true => go_in.split_on_add(connections.len(), &mut self.tape),
                         _ => vec![go_in],
                     };
                     for (ii, connection) in connections.iter().enumerate() {
-                        let mut x = &mut node.weights[ii + 1] * &mut go_in.pop().unwrap();
+                        let mut x = Tensor0DMul::mul(
+                            &mut node.weights[ii + 1],
+                            &mut go_in.pop().unwrap(),
+                            &mut self.tape,
+                        );
                         let running_value = &mut running_values[*connection];
-                        running_values[*connection] = running_value + &mut x;
+                        running_values[*connection] = match running_value {
+                            Some(rv) => Some(x.add(rv, &mut self.tape)),
+                            None => Some(x),
+                        }
                     }
                 }
                 NodeKind::Leaf => {
-                    output[nodes_len - i - 1] = std::mem::replace(
-                        &mut running_values[i],
-                        Tensor1D::new_without_tape([0.; N]),
-                    );
+                    let val = std::mem::replace(&mut running_values[i], None);
+                    output[nodes_len - i - 1] = val.unwrap();
                 }
             }
         }
         output
     }
 
-    // Same as forward_batch above, but uses the & impl of add and mul
-    pub fn forward_batch_no_grad(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N>> {
-        let mut output: Vec<Tensor1D<N>> = Vec::with_capacity(self.leaves_count);
-        output.resize(self.leaves_count, Tensor1D::new_without_tape([0.; N]));
-        let mut running_values: Vec<Tensor1D<N>> = Vec::with_capacity(self.nodes.len());
-        running_values.resize(self.nodes.len(), Tensor1D::new_without_tape([0.; N]));
+    pub fn forward_batch_no_grad(
+        &mut self,
+        input: &Vec<Tensor1D<N>>,
+    ) -> Vec<Tensor1D<N, WithoutTape>> {
+        let mut output: Vec<Tensor1D<N, WithoutTape>> = Vec::new();
+        output.resize(self.leaves_count, Tensor1D::new([0.; N]));
+        let mut running_values: Vec<Option<Tensor1D<N, WithoutTape>>> = Vec::new();
+        running_values.resize(self.nodes.len(), None);
         let nodes_len = self.nodes.len();
         for (i, node) in self.nodes.iter_mut().enumerate() {
             match node.kind {
@@ -269,28 +289,46 @@ impl<const N: usize> Network<N> {
                             continue;
                         }
                         for (ii, connection) in connections.iter().enumerate() {
-                            let x = &node.weights[ii] * &input[i];
-                            let running_value = &running_values[*connection];
-                            running_values[*connection] = running_value + &x;
+                            let mut x =
+                                node.weights[ii].mul_explicit_no_grad(&input[i], &mut self.tape);
+                            let running_value = &mut running_values[*connection];
+                            running_values[*connection] = match running_value {
+                                Some(rv) => Some(x.add(rv, &mut self.tape).to_without_tape()),
+                                None => Some(x.to_without_tape()),
+                            }
                         }
                     }
                 }
                 NodeKind::Normal => {
                     let connections = self.connections_to.get(&node.id).unwrap();
-                    let go_in = &running_values[i]
-                        + &(&node.weights[0] * &Tensor1D::new_without_tape([1.; N]));
-                    let go_in = Tensor1D::mish_no_grad(&go_in);
+                    let running_value = &mut running_values[i];
+                    let mut go_in = match running_value.as_mut() {
+                        Some(mut rv) => {
+                            let mut bias = node.weights[0].mul_explicit_no_grad(
+                                &mut Tensor1D::<N, WithoutTape>::new([1.; N]),
+                                &mut self.tape,
+                            );
+                            bias.add(&mut rv, &mut self.tape)
+                        }
+                        None => node.weights[i].mul_explicit_no_grad(
+                            &mut Tensor1D::<N, WithoutTape>::new([1.; N]),
+                            &mut self.tape,
+                        ),
+                    };
+                    let go_in = go_in.mish(&mut self.tape);
                     for (ii, connection) in connections.iter().enumerate() {
-                        let x = &node.weights[ii + 1] * &go_in;
-                        let running_value = &running_values[*connection];
-                        running_values[*connection] = running_value + &x;
+                        let mut x =
+                            node.weights[ii + 1].mul_explicit_no_grad(&go_in, &mut self.tape);
+                        let running_value = &mut running_values[*connection];
+                        running_values[*connection] = match running_value {
+                            Some(rv) => Some(x.add(rv, &mut self.tape).to_without_tape()),
+                            None => Some(x.to_without_tape()),
+                        }
                     }
                 }
                 NodeKind::Leaf => {
-                    output[nodes_len - i - 1] = std::mem::replace(
-                        &mut running_values[i],
-                        Tensor1D::new_without_tape([0.; N]),
-                    );
+                    let val = std::mem::replace(&mut running_values[i], None);
+                    output[nodes_len - i - 1] = val.unwrap();
                 }
             }
         }
@@ -338,7 +376,7 @@ impl<const N: usize> Network<N> {
             return;
         }
         let weighted = WeightedIndex::new(weights.iter().map(|w| w.2.powi(2) + 1.0)).unwrap();
-        let mut sampled = HashSet::new();
+        let mut sampled = FxHashSet::default();
         for _i in 0..count {
             let item = weights[weighted.sample(&mut rng)];
             if sampled.contains(&item.0) {
@@ -349,11 +387,13 @@ impl<const N: usize> Network<N> {
                 NodeKind::Normal => item.1 - 1,
                 _ => item.1,
             };
+            // NOTE Removing done here
             self.connections_to
                 .get_mut(&self.nodes[item.0].id)
                 .unwrap()
                 .remove(removal_index);
-            self.nodes[item.0].weights.remove(item.1);
+            // self.nodes[item.0].weights.remove(item.1);
+            self.nodes[item.0].remove_weight(item.1, &mut self.tape);
         }
     }
 
@@ -377,9 +417,10 @@ impl<const N: usize> Network<N> {
         }
     }
 
-    pub fn apply_gradients(&mut self, mut gradients: Gradients<N>) {
+    pub fn execute_and_apply_gradients(&mut self) {
+        let mut grads = self.tape.execute();
         for n in self.nodes.iter_mut() {
-            n.apply_gradients(&mut gradients);
+            n.apply_gradients(&mut grads);
         }
     }
 
@@ -388,17 +429,10 @@ impl<const N: usize> Network<N> {
             .iter()
             .fold(0, |acc, (_key, value)| acc + value.len() as i32)
     }
-
-    pub fn set_tape(&mut self, tape: Arc<RwLock<Tape<N>>>) {
-        self.tape = tape;
-        self.nodes
-            .iter_mut()
-            .for_each(|n| n.set_tape(self.tape.clone()));
-    }
 }
 
 impl<const N: usize> Node<N> {
-    pub fn new(kind: NodeKind, tape: Arc<RwLock<Tape<N>>>) -> Self {
+    fn new(kind: NodeKind, tape: &mut Tape<N>) -> Self {
         match kind {
             NodeKind::Normal => {
                 let mut node = Self {
@@ -406,9 +440,8 @@ impl<const N: usize> Node<N> {
                     weights: Vec::new(),
                     kind,
                     optimizer: Box::new(AdamOptimizer::default()),
-                    tape,
                 };
-                node.add_weight();
+                node.add_weight(tape);
                 node
             }
             NodeKind::Input => Self {
@@ -416,38 +449,37 @@ impl<const N: usize> Node<N> {
                 weights: Vec::new(),
                 kind,
                 optimizer: Box::new(AdamOptimizer::default()),
-                tape,
             },
             NodeKind::Leaf => Self {
                 id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                 weights: Vec::new(),
                 kind,
                 optimizer: Box::new(AdamOptimizer::default()),
-                tape,
             },
         }
     }
 
-    pub fn add_weight(&mut self) {
+    fn add_weight(&mut self, tape: &mut Tape<N>) {
         let mut rng = rand::thread_rng();
         let w = (rng.gen::<f64>() - 0.5) / 100.;
-        self.weights
-            .push(Tensor0D::new_with_tape(w, Some(self.tape.clone())));
+        let mut v: Tensor0D<N, WithTape> = Tensor0D::new(w);
+        v.set_id_grad_for(tape.get_next_network_tensor_id());
+        self.weights.push(v);
+    }
+
+    fn remove_weight(&mut self, index: usize, tape: &mut Tape<N>) {
+        tape.remove_network_tensor(self.weights[index].id);
+        self.weights.remove(index);
     }
 
     fn apply_gradients(&mut self, gradients: &mut Gradients<N>) {
         for w in self.weights.iter_mut() {
             let w_gradients = gradients.remove_or_0(w.id);
             let averaged_gradients: f64 = w_gradients.data.iter().sum::<f64>() / (N as f64);
-            // let update = (0.01 * averaged_gradients).min(0.1).max(-0.1);
-            w.data -= self.optimizer.update(averaged_gradients);
+            if averaged_gradients != 0. {
+                // w.data -= 0.01 * averaged_gradients;
+                w.data -= self.optimizer.update(averaged_gradients);
+            }
         }
-    }
-
-    pub fn set_tape(&mut self, tape: Arc<RwLock<Tape<N>>>) {
-        self.tape = tape;
-        self.weights
-            .iter_mut()
-            .for_each(|x| x.set_tape(Some(self.tape.clone())));
     }
 }

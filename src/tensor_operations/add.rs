@@ -1,80 +1,80 @@
-use crate::tensors::{Tensor, Tensor1D};
-use std::ops::Add;
+use crate::gradients::Tape;
+use crate::tensors::{element_wise_addition, Tensor1D, WithTape, WithoutTape};
 
-impl<'a, 'b, const N: usize> Add<&'b mut Tensor1D<N>> for &'a mut Tensor1D<N> {
-    type Output = Tensor1D<N>;
+pub trait Tensor1DAdd<const N: usize, TensorTape1, TensorTape2> {
+    fn add(
+        &mut self,
+        left: &mut Tensor1D<N, TensorTape1>,
+        tape: &mut Tape<N>,
+    ) -> Tensor1D<N, TensorTape2>;
+}
 
-    fn add(self, other: &'b mut Tensor1D<N>) -> Self::Output {
-        let mut tracker = 0;
-        let new_data: [f64; N] = self.data.map(|a| {
-            let x = a + other.data[tracker];
-            tracker += 1;
-            x
-        });
+impl<const N: usize> Tensor1DAdd<N, WithoutTape, WithTape> for Tensor1D<N, WithTape> {
+    fn add(
+        &mut self,
+        other: &mut Tensor1D<N, WithoutTape>,
+        _tape: &mut Tape<N>,
+    ) -> Tensor1D<N, WithTape> {
+        let new_data = element_wise_addition(&self.data, &other.data);
+        let mut new = Tensor1D::new(new_data);
+        new.grad_for = self.id;
+        new
+    }
+}
 
-        let mut new = Tensor1D::new_without_tape(new_data);
-        match (&self.tape, &other.tape) {
-            (Some(self_tape), Some(_other_tape)) => {
-                new.set_tape(self.tape.clone());
-                let new_id = new.grad_for;
-                let self_id = self.grad_for;
-                let other_id = other.grad_for;
-                self_tape.write().unwrap().add_operation((
-                    new_id,
-                    Box::new(move |g| {
-                        let tg1 = g.remove(new_id);
-                        let tg2 = tg1.clone();
-                        g.insert(self_id, tg1);
-                        g.insert(other_id, tg2);
-                    }),
-                ));
-            }
-            (Some(_self_tape), None) => {
-                new.set_tape_no_id(self.tape.clone());
-                new.grad_for = self.id;
-            }
-            (None, Some(_other_tape)) => {
-                new.set_tape_no_id(other.tape.clone());
-                new.grad_for = other.id;
-            }
-            (None, None) => (),
-        }
+impl<const N: usize> Tensor1DAdd<N, WithTape, WithTape> for Tensor1D<N, WithTape> {
+    fn add(
+        &mut self,
+        other: &mut Tensor1D<N, WithTape>,
+        tape: &mut Tape<N>,
+    ) -> Tensor1D<N, WithTape> {
+        let new_data = element_wise_addition(&self.data, &other.data);
+        let mut new = Tensor1D::new(new_data);
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
+        // Add operation to tape
+        let self_id = self.grad_for;
+        let other_id = other.grad_for;
+        let new_id = new.grad_for;
+        tape.add_operation((
+            new_id,
+            Box::new(move |g| {
+                let tg1 = g.remove(new_id);
+                let tg2 = tg1.clone();
+                g.insert(self_id, tg1);
+                g.insert(other_id, tg2);
+            }),
+        ));
 
         new
     }
 }
 
-impl<'a, 'b, const N: usize> Add<&'b Tensor1D<N>> for &'a Tensor1D<N> {
-    type Output = Tensor1D<N>;
-
-    fn add(self, other: &'b Tensor1D<N>) -> Self::Output {
-        let mut tracker = 0;
-        let new_data: [f64; N] = self.data.map(|a| {
-            let x = a + other.data[tracker];
-            tracker += 1;
-            x
-        });
-        Tensor1D::new_without_tape(new_data)
+impl<const N: usize> Tensor1DAdd<N, WithoutTape, WithoutTape> for Tensor1D<N, WithoutTape> {
+    fn add(
+        &mut self,
+        other: &mut Tensor1D<N, WithoutTape>,
+        _tape: &mut Tape<N>,
+    ) -> Tensor1D<N, WithoutTape> {
+        let new_data = element_wise_addition(&self.data, &other.data);
+        Tensor1D::new(new_data)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{gradients::Tape, tensors::Tensor};
-    use std::sync::Arc;
-    use std::sync::RwLock;
+    use crate::gradients::Tape;
 
     #[test]
     fn test_add_1d_dual_grad() {
-        let tape: Arc<RwLock<Tape<3>>> = Arc::new(RwLock::new(Tape::new()));
-        let mut a = Tensor1D::new_with_tape([1., 2., 3.], Some(tape.clone()));
-        let mut b = Tensor1D::new_with_tape([2., 3., 4.], Some(tape.clone()));
-        let mut c = &mut a + &mut b;
+        let mut tape: Tape<3> = Tape::new();
+        let mut a: Tensor1D<3, WithTape> = Tensor1D::new([1., 2., 3.]);
+        let mut b: Tensor1D<3, WithTape> = Tensor1D::new([2., 3., 4.]);
+        let c = a.add(&mut b, &mut tape);
         // Check value match
         assert_eq!([3., 5., 7.], c.data);
         // Check gradients
-        let mut grads = c.backward();
+        let grads = tape.execute();
         let a_grads = grads.remove(a.grad_for);
         let b_grads = grads.remove(b.grad_for);
         assert_eq!([1., 1., 1.], a_grads.data);

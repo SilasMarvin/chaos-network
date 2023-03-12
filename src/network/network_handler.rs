@@ -1,10 +1,11 @@
 use crate::network::Network;
-use crate::tensors::{Tensor, Tensor1D};
+use crate::tensor_operations::Tensor1DNll;
+use crate::tensors::Tensor1D;
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use rayon::prelude::*;
 
-const POPULATION_SIZE: usize = 64;
+const POPULATION_SIZE: usize = 32;
 
 #[derive(Clone)]
 pub struct RepeatingNetworkData<const I: usize, const N: usize> {
@@ -26,7 +27,7 @@ impl<const I: usize, const N: usize> RepeatingNetworkData<I, N> {
                     .collect::<Vec<f64>>()
                     .try_into()
                     .unwrap();
-                Tensor1D::new_without_tape(data)
+                Tensor1D::new(data)
             })
             .collect();
         let labels: Vec<usize> = indexes
@@ -92,9 +93,8 @@ fn train_next_batch<const N: usize>(
 ) {
     let (labels, inputs) = train_data;
     let outputs = network.forward_batch(inputs);
-    let loss = &mut Tensor1D::nll(outputs, labels);
-    let grads = loss.backward();
-    network.apply_gradients(grads);
+    let _loss = &mut Tensor1D::nll(outputs, labels, &mut network.tape);
+    network.execute_and_apply_gradients();
 }
 
 fn validate_next_batch<const N: usize>(
@@ -160,21 +160,60 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                 .collect::<Vec<(Vec<usize>, Vec<Tensor1D<N>>)>>();
             // Current population and maybe new networks
             population = if training_step != 0 && training_step % 10 == 0 {
+                // population = if false {
                 let new_networks = population.iter().map(|x| x.clone()).collect();
                 let new_morphed_networks =
                     self.train_population(new_networks, &batch_train_data, &batch_test_data, true);
+                let new_population_networks =
+                    self.train_population(population, &batch_train_data, &batch_test_data, false);
+
+                // Sort the new networks
+                let network_sizes: Vec<f64> = new_population_networks
+                    .iter()
+                    .chain(new_morphed_networks.iter())
+                    .map(|(n, _)| n.get_connection_count() as f64)
+                    .collect();
+                let min_network_size = network_sizes
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
+                let mut new_population_networks: Vec<(Network<N>, f64, f64)> =
+                    new_population_networks
+                        .into_iter()
+                        .map(|(n, ava)| {
+                            let connection_count = n.get_connection_count() as f64;
+                            (
+                                n,
+                                ava,
+                                ava + ((min_network_size / connection_count) * 0.025),
+                            )
+                        })
+                        .collect();
+                let mut new_morphed_networks: Vec<(Network<N>, f64, f64)> = new_morphed_networks
+                    .into_iter()
+                    .map(|(n, ava)| {
+                        let connection_count = n.get_connection_count() as f64;
+                        (
+                            n,
+                            ava,
+                            ava + ((min_network_size / connection_count) * 0.025),
+                        )
+                    })
+                    .collect();
+                new_population_networks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+                new_morphed_networks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+
+                println!("Training Step: {}", training_step);
                 println!(
-                    "New Morphed Networks: {:?}",
+                    "Morphed Networks: {:?}",
                     new_morphed_networks
                         .iter()
                         .take(5)
                         .map(|(n, ava, score)| (*ava, *score, n.get_connection_count()))
                         .collect::<Vec<(f64, f64, i32)>>()
                 );
-                let new_population_networks =
-                    self.train_population(population, &batch_train_data, &batch_test_data, false);
                 println!(
-                    "New Population Networks: {:?}",
+                    "Population Networks: {:?}",
                     new_population_networks
                         .iter()
                         .take(5)
@@ -182,22 +221,47 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                         .collect::<Vec<(f64, f64, i32)>>()
                 );
 
-                // Merge them together
+                // Merge the new networks, I think this fancy merge is pretty pointless
+                // It seems that count_morphed_networks_to_include is always just (POPULATION_SIZE
+                // / 2)
+                let mut p_index = 0;
+                let mut m_index = ((POPULATION_SIZE / 2) - 1).max(0);
+                let m_start = m_index;
+                while p_index < (POPULATION_SIZE / 2) && m_index < (POPULATION_SIZE / 2) {
+                    if new_morphed_networks[m_index].2 > new_population_networks[p_index].2 {
+                        m_index += 1;
+                    } else {
+                        p_index += 1;
+                    }
+                }
+                let count_morphed_networks_to_include = (m_index - m_start) + (POPULATION_SIZE / 2);
                 new_population_networks
                     .into_iter()
-                    .zip(new_morphed_networks.into_iter())
                     .rev()
-                    .skip(POPULATION_SIZE / 2)
-                    .map(|(a, b)| vec![a.0, b.0])
-                    .flatten()
+                    .skip(count_morphed_networks_to_include)
+                    .chain(
+                        new_morphed_networks
+                            .into_iter()
+                            .rev()
+                            .skip(POPULATION_SIZE - count_morphed_networks_to_include),
+                    )
+                    .map(|(n, _, _)| n)
                     .collect()
             } else {
                 self.train_population(population, &batch_train_data, &batch_test_data, false)
                     .into_iter()
-                    // .inspect(|(_, ava, _)| println!("{}", ava))
-                    .map(|(n, _, _)| n)
+                    // .inspect(|(_, ava)| println!("{}", ava))
+                    .map(|(n, _)| n)
                     .collect()
-            }
+            };
+            // println!(
+            //     "Resulting population: {:?}",
+            //     population
+            //         .iter()
+            //         .take(10)
+            //         .map(|n| n.get_connection_count())
+            //         .collect::<Vec<i32>>()
+            // );
         }
     }
 
@@ -207,7 +271,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
         batch_train_data: &Vec<(Vec<usize>, Vec<Tensor1D<N>>)>,
         batch_test_data: &Vec<(Vec<usize>, Vec<Tensor1D<N>>)>,
         do_morph: bool,
-    ) -> Vec<(Network<N>, f64, f64)> {
+    ) -> Vec<(Network<N>, f64)> {
         // Do the training and validation
         let new_networks: Vec<(Network<N>, f64)> = population
             .into_par_iter()
@@ -234,22 +298,22 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                 (network, average_validation_accuracy)
             })
             .collect();
-        let network_sizes: Vec<f64> = new_networks
-            .iter()
-            .map(|(n, _)| n.get_connection_count() as f64)
-            .collect();
-        let min_network_size = network_sizes
-            .iter()
-            .min_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
-        let mut new_networks: Vec<(Network<N>, f64, f64)> = new_networks
-            .into_iter()
-            .map(|(n, ava)| {
-                let connection_count = n.get_connection_count() as f64;
-                (n, ava, ava + ((min_network_size / connection_count) * 0.05))
-            })
-            .collect();
-        new_networks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        // let network_sizes: Vec<f64> = new_networks
+        //     .iter()
+        //     .map(|(n, _)| n.get_connection_count() as f64)
+        //     .collect();
+        // let min_network_size = network_sizes
+        //     .iter()
+        //     .min_by(|a, b| a.partial_cmp(b).unwrap())
+        //     .unwrap();
+        // let mut new_networks: Vec<(Network<N>, f64, f64)> = new_networks
+        //     .into_iter()
+        //     .map(|(n, ava)| {
+        //         let connection_count = n.get_connection_count() as f64;
+        //         (n, ava, ava + ((min_network_size / connection_count) * 0.05))
+        //     })
+        //     .collect();
+        // new_networks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
         new_networks
     }
 }

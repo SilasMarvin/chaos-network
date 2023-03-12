@@ -1,7 +1,7 @@
 use crate::gradients::Tape;
 use crate::tensors::{Tensor0D, Tensor1D};
+use parking_lot::RwLock;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use super::Tensor;
 
