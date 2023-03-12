@@ -13,7 +13,7 @@ impl<const N: usize> Tensor1DSplitOnAdd<N, WithTape> for Tensor1D<N, WithTape> {
         // Add operation to tape
         // For each split elment grab their gradients, and the parent gradients, and add them together
         for t in new_tensors.iter_mut() {
-            t.set_id_grad_for(tape.increment_tensor_count());
+            t.set_id_grad_for(tape.get_next_temporary_tensor_id());
             let self_id = t.grad_for;
             let old_self_id = self.grad_for;
             tape.add_operation((

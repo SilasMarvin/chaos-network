@@ -41,7 +41,7 @@ impl<const N: usize> Tensor1DNll<N> for Tensor1D<N, WithTape> {
             .try_into()
             .unwrap();
         let mut new = Tensor1D::new(losses);
-        new.set_id_grad_for(tape.increment_tensor_count());
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
         for (i, tensor) in t.into_iter().enumerate() {
             let new_id = new.grad_for;
             let self_id = tensor.grad_for;
@@ -82,13 +82,12 @@ mod tests {
             Tensor1D::new([3.; 3]),
         ];
         a.iter_mut()
-            .for_each(|t| t.set_id_grad_for(tape.increment_tensor_count()));
+            .for_each(|t| t.set_id_grad_for(tape.get_next_temporary_tensor_id()));
         let b = Tensor1D::nll(a, &vec![0, 1, 2], &mut tape);
         assert_eq!(2.40760596444438, b.data[0]);
         assert_eq!(1.4076059644443801, b.data[1]);
         assert_eq!(0.4076059644443803, b.data[2]);
-        tape.checkmark_tensor_id();
-        let mut grads = tape.execute();
+        let grads = tape.execute();
         let a_0_grads = grads.remove(1);
         let a_1_grads = grads.remove(2);
         let a_2_grads = grads.remove(3);

@@ -29,7 +29,7 @@ impl<const N: usize> Tensor0DMul<N, WithoutTape, WithTape> for Tensor0D<N, WithT
     ) -> Tensor1D<N, WithTape> {
         let new_data: [f64; N] = other.data.map(|d| self.data * d);
         let mut new = Tensor1D::new(new_data);
-        new.set_id_grad_for(tape.increment_tensor_count());
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
         // Add operation to tape
         let new_id = new.grad_for;
         let self_id = self.grad_for;
@@ -53,7 +53,7 @@ impl<const N: usize> Tensor0DMul<N, WithoutTape, WithTape> for Tensor0D<N, WithT
     ) -> Tensor1D<N, WithTape> {
         let new_data: [f64; N] = other.data.map(|d| self.data * d);
         let mut new = Tensor1D::new(new_data);
-        new.set_id_grad_for(tape.increment_tensor_count());
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
         // Add operation to tape
         let new_id = new.grad_for;
         let self_id = self.grad_for;
@@ -88,7 +88,7 @@ impl<const N: usize> Tensor0DMul<N, WithTape, WithTape> for Tensor0D<N, WithTape
     ) -> Tensor1D<N, WithTape> {
         let new_data: [f64; N] = other.data.map(|d| self.data * d);
         let mut new = Tensor1D::new(new_data);
-        new.set_id_grad_for(tape.increment_tensor_count());
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
         // Add operation to tape
         let new_id = new.grad_for;
         let self_id = self.grad_for;
@@ -171,8 +171,7 @@ mod tests {
         // Check value match
         assert_eq!([2., 4., 6.], c.data);
         // Check gradients
-        tape.checkmark_tensor_id();
-        let mut grads = tape.execute();
+        let grads = tape.execute();
         let a_grads = grads.remove(a.grad_for);
         assert_eq!([1., 2., 3.], a_grads.data);
     }

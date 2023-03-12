@@ -8,7 +8,7 @@ impl<const N: usize> Clone for Network<N> {
             leaves_count: self.leaves_count,
             nodes: self.nodes.clone(),
             connections_to: self.connections_to.clone(),
-            tape: Tape::new(),
+            tape: self.tape.clone(),
         }
     }
 }

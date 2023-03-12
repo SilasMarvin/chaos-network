@@ -15,7 +15,7 @@ impl<const N: usize> Tensor1DMish<N, WithTape> for Tensor1D<N, WithTape> {
     fn mish(&mut self, tape: &mut Tape<N>) -> Tensor1D<N, WithTape> {
         let data = self.data.map(|x| x * ((1. + x.exp()).ln()).tanh());
         let mut new = Tensor1D::new(data);
-        new.set_id_grad_for(tape.increment_tensor_count());
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
 
         // Add operation to tape
         let new_id = new.grad_for;
@@ -57,8 +57,7 @@ mod tests {
             b.data
         );
         // Check gradients
-        tape.checkmark_tensor_id();
-        let mut grads = tape.execute();
+        let grads = tape.execute();
         let a_grads = grads.remove(a.id);
         assert_eq!(
             [1.0490362200997918, 1.0693179342794896, 1.0211069109294437],

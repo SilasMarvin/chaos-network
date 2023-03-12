@@ -78,9 +78,7 @@ impl<const N: usize> Network<N> {
                 let distribution_between =
                     Uniform::from(self.nodes.len() - self.leaves_count..self.nodes.len());
                 let mut rng = rand::thread_rng();
-                // let odds_of_being_picked = (count as f64 * 0.1) / (count as f64);
-                // TODO: CHANGE THIS BACK
-                let odds_of_being_picked = 1.0;
+                let odds_of_being_picked = (count as f64 * 0.1) / (count as f64);
                 for i in 0..1000 {
                     if odds_of_being_picked > rng.gen::<f64>() {
                         let input_node_index = distribution_between.sample(&mut rng);
@@ -207,7 +205,6 @@ impl<const N: usize> Network<N> {
     }
 
     pub fn forward_batch(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N, WithTape>> {
-        self.tape.checkmark_tensor_id();
         let mut output: Vec<Tensor1D<N, WithTape>> = Vec::new();
         output.resize(self.leaves_count, Tensor1D::new([0.; N]));
         let mut running_values: Vec<Option<Tensor1D<N, WithTape>>> = Vec::new();
@@ -236,7 +233,7 @@ impl<const N: usize> Network<N> {
                     let running_value = &mut running_values[i];
                     let mut go_in = match running_value.as_mut() {
                         Some(mut rv) => {
-                            let mut bias = node.weights[i].mul_left_by_reference(
+                            let mut bias = node.weights[0].mul_left_by_reference(
                                 &mut Tensor1D::<N, WithoutTape>::new([1.; N]),
                                 &mut self.tape,
                             );
@@ -307,7 +304,7 @@ impl<const N: usize> Network<N> {
                     let running_value = &mut running_values[i];
                     let mut go_in = match running_value.as_mut() {
                         Some(mut rv) => {
-                            let mut bias = node.weights[i].mul_explicit_no_grad(
+                            let mut bias = node.weights[0].mul_explicit_no_grad(
                                 &mut Tensor1D::<N, WithoutTape>::new([1.; N]),
                                 &mut self.tape,
                             );
@@ -395,7 +392,8 @@ impl<const N: usize> Network<N> {
                 .get_mut(&self.nodes[item.0].id)
                 .unwrap()
                 .remove(removal_index);
-            self.nodes[item.0].weights.remove(item.1);
+            // self.nodes[item.0].weights.remove(item.1);
+            self.nodes[item.0].remove_weight(item.1, &mut self.tape);
         }
     }
 
@@ -434,7 +432,7 @@ impl<const N: usize> Network<N> {
 }
 
 impl<const N: usize> Node<N> {
-    pub fn new(kind: NodeKind, tape: &mut Tape<N>) -> Self {
+    fn new(kind: NodeKind, tape: &mut Tape<N>) -> Self {
         match kind {
             NodeKind::Normal => {
                 let mut node = Self {
@@ -461,12 +459,17 @@ impl<const N: usize> Node<N> {
         }
     }
 
-    pub fn add_weight(&mut self, tape: &mut Tape<N>) {
+    fn add_weight(&mut self, tape: &mut Tape<N>) {
         let mut rng = rand::thread_rng();
         let w = (rng.gen::<f64>() - 0.5) / 100.;
         let mut v: Tensor0D<N, WithTape> = Tensor0D::new(w);
-        v.set_id_grad_for(tape.increment_tensor_count());
+        v.set_id_grad_for(tape.get_next_network_tensor_id());
         self.weights.push(v);
+    }
+
+    fn remove_weight(&mut self, index: usize, tape: &mut Tape<N>) {
+        tape.remove_network_tensor(self.weights[index].id);
+        self.weights.remove(index);
     }
 
     fn apply_gradients(&mut self, gradients: &mut Gradients<N>) {

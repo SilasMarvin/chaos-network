@@ -3,8 +3,9 @@ use crate::tensors::Tensor1D;
 #[derive(Default)]
 pub struct Tape<const N: usize> {
     operations: Vec<(usize, Box<dyn FnOnce(&mut Gradients<N>) + Send + Sync>)>,
-    current_tensor_id: usize,
-    checkmarked_tensor_id: usize,
+    current_network_tensor_id: usize,
+    removed_network_tensor_ids: Vec<usize>,
+    current_temporary_tensor_id: usize,
     gradients: Gradients<N>,
 }
 
@@ -16,12 +17,25 @@ impl<const N: usize> std::fmt::Debug for Tape<N> {
     }
 }
 
+impl<const N: usize> Clone for Tape<N> {
+    fn clone(&self) -> Self {
+        Self {
+            operations: Vec::new(),
+            current_network_tensor_id: self.current_network_tensor_id,
+            removed_network_tensor_ids: self.removed_network_tensor_ids.clone(),
+            current_temporary_tensor_id: self.current_temporary_tensor_id,
+            gradients: Gradients::default(),
+        }
+    }
+}
+
 impl<const N: usize> Tape<N> {
     pub fn new() -> Self {
         Self {
             operations: Vec::new(),
-            current_tensor_id: 0,
-            checkmarked_tensor_id: 0,
+            current_network_tensor_id: 0,
+            removed_network_tensor_ids: Vec::new(),
+            current_temporary_tensor_id: 0,
             gradients: Gradients::default(),
         }
     }
@@ -33,31 +47,40 @@ impl<const N: usize> Tape<N> {
         self.operations.push(operation)
     }
 
-    pub fn checkmark_tensor_id(&mut self) {
-        self.checkmarked_tensor_id = self.current_tensor_id;
-    }
-
     pub fn execute(&mut self) -> &mut Gradients<N> {
         self.operations.sort_by(|a, b| a.0.cmp(&b.0));
-        if self.gradients.grads.len() < self.current_tensor_id + 1 {
-            self.gradients
-                .grads
-                .resize(self.current_tensor_id + 1, None);
+        if self.gradients.grads.len()
+            < self.current_network_tensor_id + self.current_temporary_tensor_id + 1
+        {
+            self.gradients.grads.resize(
+                self.current_network_tensor_id + self.current_temporary_tensor_id + 1,
+                None,
+            );
         }
         for operation in self.operations.drain(..).rev() {
             (operation.1)(&mut self.gradients);
         }
-        self.current_tensor_id = self.checkmarked_tensor_id;
-        // let returned_grads =
-        //     Gradients::new(self.gradients.grads[..self.current_tensor_id + 1].to_vec());
-        // (0..self.current_tensor_id + 1).for_each(|i| self.gradients.grads[i] = None);
-        // returned_grads
+        // We are assuming the only tensors with tape associated with this tape are network tensors
+        self.current_temporary_tensor_id = 0;
         &mut self.gradients
     }
 
-    pub fn increment_tensor_count(&mut self) -> usize {
-        self.current_tensor_id += 1;
-        self.current_tensor_id
+    pub fn get_next_network_tensor_id(&mut self) -> usize {
+        if self.removed_network_tensor_ids.len() > 0 {
+            self.removed_network_tensor_ids.pop().unwrap()
+        } else {
+            self.current_network_tensor_id += 1;
+            self.current_network_tensor_id
+        }
+    }
+
+    pub fn remove_network_tensor(&mut self, id: usize) {
+        self.removed_network_tensor_ids.push(id);
+    }
+
+    pub fn get_next_temporary_tensor_id(&mut self) -> usize {
+        self.current_temporary_tensor_id += 1;
+        self.current_temporary_tensor_id + self.current_network_tensor_id
     }
 }
 
@@ -67,10 +90,6 @@ pub struct Gradients<const N: usize> {
 }
 
 impl<const N: usize> Gradients<N> {
-    pub fn new(grads: Vec<Option<Tensor1D<N>>>) -> Self {
-        Self { grads }
-    }
-
     pub fn remove(&mut self, id: usize) -> Tensor1D<N> {
         let x = std::mem::take(&mut self.grads[id]);
         match x {
@@ -86,6 +105,10 @@ impl<const N: usize> Gradients<N> {
             None => Tensor1D::new([0.; N]),
         }
     }
+
+    // pub fn remove_raw(&mut self, id: usize) -> Option<Tensor1D<N>> {
+    //     std::mem::take(&mut self.grads[id])
+    // }
 
     pub fn insert(&mut self, key: usize, tensor: Tensor1D<N>) {
         // Super fast insert
@@ -149,7 +172,7 @@ impl<const N: usize> Default for Gradients<N> {
 //         gradients
 //     }
 //
-//     pub fn increment_tensor_count(&mut self) -> usize {
+//     pub fn get_next_temporary_tensor_id(&mut self) -> usize {
 //         self.current_tensor_id += 1;
 //         self.current_tensor_id
 //     }

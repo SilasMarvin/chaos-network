@@ -30,7 +30,7 @@ impl<const N: usize> Tensor1DAdd<N, WithTape, WithTape> for Tensor1D<N, WithTape
     ) -> Tensor1D<N, WithTape> {
         let new_data = element_wise_addition(&self.data, &other.data);
         let mut new = Tensor1D::new(new_data);
-        new.set_id_grad_for(tape.increment_tensor_count());
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
         // Add operation to tape
         let self_id = self.grad_for;
         let other_id = other.grad_for;
@@ -74,8 +74,7 @@ mod tests {
         // Check value match
         assert_eq!([3., 5., 7.], c.data);
         // Check gradients
-        tape.checkmark_tensor_id();
-        let mut grads = tape.execute();
+        let grads = tape.execute();
         let a_grads = grads.remove(a.grad_for);
         let b_grads = grads.remove(b.grad_for);
         assert_eq!([1., 1., 1.], a_grads.data);
