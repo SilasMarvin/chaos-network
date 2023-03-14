@@ -1,6 +1,6 @@
 // The most massive shoutout possible to Johnny's answer here: https://stackoverflow.com/questions/50017987/cant-clone-vecboxtrait-because-trait-cannot-be-made-into-an-object
 
-pub trait Optimizer: OptimizerClone + Send {
+pub trait Optimizer: OptimizerClone + Send + Sync {
     fn update(&mut self, g: f64) -> f64;
 }
 
