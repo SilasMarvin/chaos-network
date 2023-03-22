@@ -1,9 +1,9 @@
 mod chaos_network;
-mod clone;
-mod fmt;
+mod head_network;
 mod network_handler;
-mod optimizers;
+mod order_network;
 
-pub use self::chaos_network::{Network, Node, NodeKind};
+pub use self::chaos_network::*;
+// pub use self::head_network::*;
 pub use self::network_handler::{RepeatingNetworkData, StandardClassificationNetworkHandler};
-pub use self::optimizers::*;
+pub use self::order_network::*;

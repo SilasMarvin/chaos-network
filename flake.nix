@@ -2,6 +2,10 @@
   description = "ad";
 
   inputs = {
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nixpkgs = {
       url = "github:nixos/nixpkgs?ref=release-22.05";
     };
@@ -10,12 +14,13 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, fenix, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem
       (system:
         let
           pkgs = import nixpkgs {
             inherit system;
+            overlays = [ fenix.overlays.default ];
           };
         in
         rec {
@@ -26,6 +31,15 @@
                 pkg-config
                 openssl
                 cargo-flamegraph
+                cargo-expand
+                (pkgs.fenix.complete.withComponents [
+                  "cargo"
+                  "clippy"
+                  "rust-src"
+                  "rustc"
+                  "rustfmt"
+                ])
+                rust-analyzer-nightly
               ];
             };
         }

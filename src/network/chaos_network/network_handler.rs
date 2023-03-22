@@ -6,7 +6,7 @@ use rand::prelude::*;
 use rayon::prelude::*;
 use termion::input::TermRead;
 
-const MORPHS_PER_ITERATION: usize = 32;
+const MORPHS_PER_ITERATION: usize = 1;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
@@ -35,63 +35,57 @@ fn parse_input(inp: String) -> Result<(Action, f64), Box<dyn std::error::Error>>
 }
 
 #[derive(Clone)]
-pub struct RepeatingNetworkData<const I: usize, const N: usize> {
+pub struct RepeatingChaosNetworkData<const I: usize, const N: usize> {
     labels: Vec<u8>,
     data: Vec<[u8; I]>,
 }
 
-impl<const I: usize, const N: usize> RepeatingNetworkData<I, N> {
+impl<const I: usize, const N: usize> RepeatingChaosNetworkData<I, N> {
     pub fn new(labels: Vec<u8>, data: Vec<[u8; I]>) -> Self {
-        RepeatingNetworkData { labels, data }
+        RepeatingChaosNetworkData { labels, data }
     }
 
-    fn next(&mut self) -> (Box<[usize; N]>, Box<[[f64; I]; N]>) {
-        let mut rng = thread_rng();
-        let distribution = Uniform::from(0..self.data.len());
-        let indices: [usize; N] = (0..N)
-            .map(|_i| distribution.sample(&mut rng))
-            .collect::<Vec<usize>>()
-            .try_into()
-            .unwrap();
-        let inputs: [[f64; I]; N] =
-            indices.map(|index| self.data[index].map(|d| (d as f64) / 255.));
-        let labels: [usize; N] = indices.map(|index| self.labels[index] as usize);
-        (Box::new(labels), Box::new(inputs))
+    fn next(&self, indexes: &[usize; N]) -> (Vec<usize>, Vec<Tensor1D<N>>) {
+        let inputs: Vec<Tensor1D<N>> = (0..I)
+            .map(|i| {
+                let data: [f64; N] = indexes
+                    .iter()
+                    .map(|ii| self.data[*ii][i] as f64 / 255.)
+                    .collect::<Vec<f64>>()
+                    .try_into()
+                    .unwrap();
+                Tensor1D::new(data)
+            })
+            .collect();
+        let labels: Vec<usize> = indexes
+            .into_iter()
+            .map(|i| self.labels[*i] as usize)
+            .collect();
+        (labels, inputs)
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
     }
 }
 
-fn transform_train_data_for_chaos_network<const I: usize, const N: usize>(
-    data: Box<[[f64; I]; N]>,
-) -> Box<[Tensor1D<N>; I]> {
-    let ret: [Tensor1D<N>; I] = (0..I)
-        .map(|i| {
-            let t_data: [f64; N] = (0..N)
-                .map(|ii| data[ii][i])
-                .collect::<Vec<f64>>()
-                .try_into()
-                .unwrap();
-            Tensor1D::new(t_data)
-        })
-        .collect::<Vec<Tensor1D<N>>>()
-        .try_into()
-        .unwrap();
-    Box::new(ret)
-}
-
-pub struct StandardClassificationNetworkHandler<const I: usize, const O: usize, const N: usize> {
+pub struct StandardClassificationChaosNetworkHandler<const I: usize, const O: usize, const N: usize>
+{
     max_training_steps: usize,
     steps_per_training_step: usize,
-    train_data: RepeatingNetworkData<I, N>,
-    test_data: RepeatingNetworkData<I, N>,
+    train_data: RepeatingChaosNetworkData<I, N>,
+    test_data: RepeatingChaosNetworkData<I, N>,
     validation_steps: usize,
 }
 
-impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetworkHandler<I, O, N> {
+impl<const I: usize, const O: usize, const N: usize>
+    StandardClassificationChaosNetworkHandler<I, O, N>
+{
     pub fn new(
         max_training_steps: usize,
         steps_per_training_step: usize,
-        train_data: RepeatingNetworkData<I, N>,
-        test_data: RepeatingNetworkData<I, N>,
+        train_data: RepeatingChaosNetworkData<I, N>,
+        test_data: RepeatingChaosNetworkData<I, N>,
         validation_steps: usize,
     ) -> Self {
         Self {
@@ -104,8 +98,8 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
     }
 }
 
-fn grow<const I: usize, const O: usize, const N: usize>(
-    network: &mut ChaosNetwork<I, O, N>,
+fn grow<const N: usize>(
+    network: &mut ChaosNetwork<N>,
     percent_nodes_to_add: f64,
     percent_edges_to_add: f64,
 ) {
@@ -115,17 +109,14 @@ fn grow<const I: usize, const O: usize, const N: usize>(
     network.add_random_edges_for_random_nodes(edges_to_add);
 }
 
-fn prune<const I: usize, const O: usize, const N: usize>(
-    network: &mut ChaosNetwork<I, O, N>,
-    percent_edges_to_remove: f64,
-) {
+fn prune<const N: usize>(network: &mut ChaosNetwork<N>, percent_edges_to_remove: f64) {
     let edges_to_remove = (network.get_edge_count() as f64 * percent_edges_to_remove) as usize;
     network.remove_weighted_edges(edges_to_remove);
 }
 
-fn train_next_batch<const I: usize, const O: usize, const N: usize>(
-    network: &mut ChaosNetwork<I, O, N>,
-    train_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; I]>),
+fn train_next_batch<const N: usize>(
+    network: &mut ChaosNetwork<N>,
+    train_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) {
     let (labels, inputs) = train_data;
     let outputs = network.forward_batch(inputs);
@@ -133,9 +124,9 @@ fn train_next_batch<const I: usize, const O: usize, const N: usize>(
     network.execute_and_apply_gradients();
 }
 
-fn validate_next_batch<const I: usize, const O: usize, const N: usize>(
-    network: &mut ChaosNetwork<I, O, N>,
-    test_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; I]>),
+fn validate_next_batch<const N: usize>(
+    network: &mut ChaosNetwork<N>,
+    test_data: &(Vec<usize>, Vec<Tensor1D<N>>),
 ) -> f64 {
     let (labels, inputs) = test_data;
     let outputs = network.forward_batch_no_grad(inputs);
@@ -158,40 +149,48 @@ fn validate_next_batch<const I: usize, const O: usize, const N: usize>(
     (correct as f64) / N as f64
 }
 
-impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetworkHandler<I, O, N> {
+impl<const I: usize, const O: usize, const N: usize>
+    StandardClassificationChaosNetworkHandler<I, O, N>
+{
     pub fn train(&mut self) {
         let mut stdin = termion::async_stdin();
         let mut size_weight = 0.075;
-        let mut current_network: ChaosNetwork<I, O, N> = ChaosNetwork::new(I, 100);
-        // let mut head: ChaosNetwork<I, O, N> = ChaosNetwork::new_fully_connected(100, O);
+        let mut current_network = ChaosNetwork::new(I, O);
+
+        // Prep some stuff for getting random data points
+        let train_data_distribution = Uniform::from(0..self.train_data.len());
+        let test_data_distribution = Uniform::from(0..self.test_data.len());
+        let mut rng = thread_rng();
 
         // Do the actual training
         for training_step in 0..self.max_training_steps {
-            // Prep the data
-            let batch_train_data: Vec<(Box<[usize; N]>, Box<[Tensor1D<N>; I]>)> = (0..self
-                .steps_per_training_step)
+            // Prep the random indexes
+            let batch_train_data = (0..self.steps_per_training_step)
                 .map(|_i| {
-                    let (train_labels, train_examples) = self.train_data.next();
-                    (
-                        train_labels,
-                        transform_train_data_for_chaos_network(train_examples),
+                    self.train_data.next(
+                        &(0..N)
+                            .map(|_ii| train_data_distribution.sample(&mut rng))
+                            .collect::<Vec<usize>>()
+                            .try_into()
+                            .unwrap(),
                     )
                 })
-                .collect();
-            let batch_test_data: Vec<(Box<[usize; N]>, Box<[Tensor1D<N>; I]>)> = (0..self
-                .validation_steps)
+                .collect::<Vec<(Vec<usize>, Vec<Tensor1D<N>>)>>();
+            let batch_test_data = (0..self.validation_steps)
                 .map(|_i| {
-                    let (train_labels, train_examples) = self.test_data.next();
-                    (
-                        train_labels,
-                        transform_train_data_for_chaos_network(train_examples),
+                    self.train_data.next(
+                        &(0..N)
+                            .map(|_ii| test_data_distribution.sample(&mut rng))
+                            .collect::<Vec<usize>>()
+                            .try_into()
+                            .unwrap(),
                     )
                 })
-                .collect();
+                .collect::<Vec<(Vec<usize>, Vec<Tensor1D<N>>)>>();
 
             // Do it!
             current_network = if training_step % 10 == 0 {
-                let new_networks: Vec<(ChaosNetwork<I, O, N>, f64)> = (0..MORPHS_PER_ITERATION)
+                let new_networks: Vec<(ChaosNetwork<N>, f64)> = (0..MORPHS_PER_ITERATION)
                     .into_par_iter()
                     .map(|_i| {
                         let mut network = if training_step != 0 {
@@ -209,9 +208,8 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                         batch_train_data
                             .iter()
                             .for_each(|batch| train_next_batch(&mut network, batch));
-                        let average_validation_accuracy: f64 = batch_test_data
-                            .iter()
-                            .map(|step| validate_next_batch(&mut network, step))
+                        let average_validation_accuracy: f64 = (0..self.validation_steps)
+                            .map(|step| validate_next_batch(&mut network, &batch_test_data[step]))
                             .sum::<f64>()
                             / (self.validation_steps as f64);
                         (network, average_validation_accuracy)
@@ -227,22 +225,19 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                     .iter()
                     .min_by(|a, b| a.partial_cmp(b).unwrap())
                     .unwrap();
-                let (new_network, average_validation_accuracy, score): (
-                    ChaosNetwork<I, O, N>,
-                    f64,
-                    f64,
-                ) = new_networks
-                    .into_iter()
-                    .map(|(n, ava)| {
-                        let edge_count = n.get_edge_count() as f64;
-                        (
-                            n,
-                            ava,
-                            ava + ((min_network_size / edge_count) * size_weight),
-                        )
-                    })
-                    .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
-                    .unwrap();
+                let (new_network, average_validation_accuracy, score): (ChaosNetwork<N>, f64, f64) =
+                    new_networks
+                        .into_iter()
+                        .map(|(n, ava)| {
+                            let edge_count = n.get_edge_count() as f64;
+                            (
+                                n,
+                                ava,
+                                ava + ((min_network_size / edge_count) * size_weight),
+                            )
+                        })
+                        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
+                        .unwrap();
                 println!(
                     "AVA: {} | Score: {}{:?}",
                     average_validation_accuracy, score, new_network

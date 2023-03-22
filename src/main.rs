@@ -5,7 +5,11 @@ mod network;
 mod tensor_operations;
 mod tensors;
 
-use crate::network::{RepeatingNetworkData, StandardClassificationNetworkHandler};
+use crate::network::OrderNetwork;
+use crate::network::{ChaosNetwork, RepeatingNetworkData, StandardClassificationNetworkHandler};
+
+#[macro_use]
+extern crate chaos_network_derive;
 
 const INPUTS: usize = 3072;
 const OUTPUTS: usize = 10;
@@ -15,6 +19,13 @@ const STEPS_PER_TRAINING_STEPS: usize = 150;
 const VALIDATION_STEPS: usize = 75;
 
 fn main() {
+    // let mut network: ChaosNetwork<BATCH_SIZE> = ChaosNetwork::new(1000, 10);
+    // network.add_nodes(network::NodeKind::Normal, 100);
+    // network.write(&std::path::Path::new("layers/1234/layer1.txt"));
+
+    // let network: OrderNetwork<1, BATCH_SIZE> = OrderNetwork::default();
+    // network.forward_batch_no_grad();
+
     // Load data
     let CifarResult(train_data, train_labels, test_data, test_labels) = Cifar10::default()
         .download_and_extract(true)

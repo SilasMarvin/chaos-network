@@ -1,5 +1,8 @@
 /target
 /Cargo.lock
 /data
+/chaos-network-derive/target
+/chaos-network-derive/Cargo.lock
+
 flamegraph*
 perf.*

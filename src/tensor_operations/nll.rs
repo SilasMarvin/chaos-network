@@ -1,18 +1,18 @@
 use crate::gradients::Tape;
 use crate::tensors::{element_wise_mul, Tensor1D, WithTape};
 
-pub trait Tensor1DNll<const N: usize> {
+pub trait Tensor1DNll<const O: usize, const N: usize> {
     fn nll(
-        t: Vec<Tensor1D<N, WithTape>>,
-        indexes: &Vec<usize>,
+        t: Box<[Tensor1D<N, WithTape>; O]>,
+        indexes: &[usize; N],
         tape: &mut Tape<N>,
     ) -> Tensor1D<N, WithTape>;
 }
 
-impl<const N: usize> Tensor1DNll<N> for Tensor1D<N, WithTape> {
+impl<const O: usize, const N: usize> Tensor1DNll<O, N> for Tensor1D<N, WithTape> {
     fn nll(
-        t: Vec<Tensor1D<N, WithTape>>,
-        indexes: &Vec<usize>,
+        t: Box<[Tensor1D<N, WithTape>; O]>,
+        indexes: &[usize; N],
         tape: &mut Tape<N>,
     ) -> Tensor1D<N, WithTape> {
         let sum_e = t.iter().fold([0.; N], |mut acc, t| {
@@ -76,14 +76,14 @@ mod tests {
     // Might need to double check this one
     fn test_nll_1d() {
         let mut tape: Tape<3> = Tape::new();
-        let mut a: Vec<Tensor1D<3, WithTape>> = vec![
+        let mut a: Box<[Tensor1D<3, WithTape>; 3]> = Box::new([
             Tensor1D::new([1.; 3]),
             Tensor1D::new([2.; 3]),
             Tensor1D::new([3.; 3]),
-        ];
+        ]);
         a.iter_mut()
             .for_each(|t| t.set_id_grad_for(tape.get_next_temporary_tensor_id()));
-        let b = Tensor1D::nll(a, &vec![0, 1, 2], &mut tape);
+        let b = Tensor1D::nll(a, &[0, 1, 2], &mut tape);
         assert_eq!(2.40760596444438, b.data[0]);
         assert_eq!(1.4076059644443801, b.data[1]);
         assert_eq!(0.4076059644443803, b.data[2]);

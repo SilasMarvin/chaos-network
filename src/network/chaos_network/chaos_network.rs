@@ -2,21 +2,26 @@ use rand::distributions::{Uniform, WeightedIndex};
 use rand::prelude::*;
 use rand::Rng;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use serde::Serialize;
+
 use std::boxed::Box;
-use std::collections::HashMap;
+use std::fs::DirBuilder;
+use std::fs::File;
+use std::io::Write;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::writeln;
 
 use crate::gradients::Gradients;
 use crate::gradients::Tape;
-use crate::network::optimizers::{AdamOptimizer, Optimizer};
+use crate::network::{AdamOptimizer, Optimizer};
 use crate::tensor_operations::{Tensor0DMul, Tensor1DAdd, Tensor1DMish, Tensor1DSplitOnAdd};
 use crate::tensors::{Tensor0D, Tensor1D, WithTape, WithoutTape};
 
 pub static NODE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum NodeKind {
     Input,
     Normal,
@@ -30,7 +35,7 @@ pub enum ShiftDirection {
 }
 
 #[derive(Default)]
-pub struct Network<const N: usize> {
+pub struct ChaosNetwork<const I: usize, const O: usize, const N: usize> {
     pub inputs_count: usize,
     pub leaves_count: usize,
     pub nodes: Vec<Node<N>>,
@@ -48,12 +53,17 @@ pub struct Node<const N: usize> {
     pub optimizer: Box<dyn Optimizer>,
 }
 
-impl<const N: usize> Network<N> {
+impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
     pub fn new(inputs: usize, outputs: usize) -> Self {
-        let mut network: Network<N> = Network::default();
+        let mut network: ChaosNetwork<I, O, N> = ChaosNetwork::default();
         network.input_connectivity_chance = 0.1;
         network.add_nodes(NodeKind::Leaf, outputs);
         network.add_nodes(NodeKind::Input, inputs);
+        network
+    }
+
+    pub fn new_fully_connected(inputs: usize, outputs: usize) -> Self {
+        let mut network: ChaosNetwork<I, O, N> = ChaosNetwork::default();
         network
     }
 
@@ -80,8 +90,10 @@ impl<const N: usize> Network<N> {
                 for i in 0..count {
                     self.insert_node(NodeKind::Input, 0);
                     self.inputs_count += 1;
-                    if rng.gen::<f64>() < self.input_connectivity_chance {
-                        self.add_random_edge(0);
+                    for ii in 0..self.leaves_count {
+                        if rng.gen::<f64>() < self.input_connectivity_chance {
+                            self.add_edge(0, self.nodes.len() - 1 - ii);
+                        }
                     }
                 }
             }
@@ -192,9 +204,12 @@ impl<const N: usize> Network<N> {
         self.nodes.iter().fold(0, |acc, n| acc + n.edges.len())
     }
 
-    pub fn forward_batch(&mut self, input: &Vec<Tensor1D<N>>) -> Vec<Tensor1D<N, WithTape>> {
-        let mut output: Vec<Tensor1D<N, WithTape>> = Vec::new();
-        output.resize(self.leaves_count, Tensor1D::new([0.; N]));
+    pub fn forward_batch(&mut self, input: &[Tensor1D<N>; I]) -> Box<[Tensor1D<N, WithTape>; O]> {
+        let mut output: [Tensor1D<N, WithTape>; O] = (0..O)
+            .map(|_i| Tensor1D::new([0.; N]))
+            .collect::<Vec<Tensor1D<N, WithTape>>>()
+            .try_into()
+            .unwrap();
         let mut running_values: Vec<Option<Tensor1D<N, WithTape>>> = Vec::new();
         running_values.resize(self.nodes.len(), None);
         let nodes_len = self.nodes.len();
@@ -249,15 +264,15 @@ impl<const N: usize> Network<N> {
                 }
             }
         }
-        output
+        Box::new(output)
     }
 
-    pub fn forward_batch_no_grad(
-        &mut self,
-        input: &Vec<Tensor1D<N>>,
-    ) -> Vec<Tensor1D<N, WithoutTape>> {
-        let mut output: Vec<Tensor1D<N, WithoutTape>> = Vec::new();
-        output.resize(self.leaves_count, Tensor1D::new([0.; N]));
+    pub fn forward_batch_no_grad(&mut self, input: &[Tensor1D<N>; I]) -> Box<[Tensor1D<N>; O]> {
+        let mut output: [Tensor1D<N>; O] = (0..O)
+            .map(|_i| Tensor1D::new([0.; N]))
+            .collect::<Vec<Tensor1D<N>>>()
+            .try_into()
+            .unwrap();
         let mut running_values: Vec<Option<Tensor1D<N, WithoutTape>>> = Vec::new();
         running_values.resize(self.nodes.len(), None);
         let nodes_len = self.nodes.len();
@@ -308,6 +323,73 @@ impl<const N: usize> Network<N> {
                 }
             }
         }
+        Box::new(output)
+    }
+
+    pub fn forward_batch_with_input_grads(
+        &mut self,
+        input: &mut Vec<Tensor1D<N, WithTape>>,
+    ) -> Vec<Tensor1D<N, WithTape>> {
+        let mut output: Vec<Tensor1D<N, WithTape>> = Vec::new();
+        output.resize(self.leaves_count, Tensor1D::new([0.; N]));
+        let mut running_values: Vec<Option<Tensor1D<N, WithTape>>> = Vec::new();
+        running_values.resize(self.nodes.len(), None);
+        let nodes_len = self.nodes.len();
+        for (i, node) in self.nodes.iter_mut().enumerate() {
+            match node.kind {
+                NodeKind::Input => {
+                    if node.edges.is_empty() {
+                        continue;
+                    }
+                    let mut go_in = match node.edges.len() > 1 {
+                        true => input[i].split_on_add(node.edges.len(), &mut self.tape),
+                        _ => vec![input[i].clone()],
+                    };
+                    for (ii, edge) in node.edges.iter().enumerate() {
+                        let mut x =
+                            node.weights[ii].mul_left_by_reference(&mut go_in[ii], &mut self.tape);
+                        let running_value = &mut running_values[*edge];
+                        running_values[*edge] = match running_value {
+                            Some(rv) => Some(x.add(rv, &mut self.tape)),
+                            None => Some(x),
+                        }
+                    }
+                }
+                NodeKind::Normal => {
+                    let running_value = &mut running_values[i];
+                    let mut go_in = match running_value.as_mut() {
+                        Some(mut rv) => {
+                            let mut bias = node.weights[0].mul_left_by_reference(
+                                &Tensor1D::<N, WithoutTape>::new([1.; N]),
+                                &mut self.tape,
+                            );
+                            bias.add(&mut rv, &mut self.tape)
+                        }
+                        None => {
+                            panic!("We should not be at a normal node that does not have a running value");
+                        }
+                    };
+                    let go_in = go_in.mish(&mut self.tape);
+                    let mut go_in = match node.edges.len() > 1 {
+                        true => go_in.split_on_add(node.edges.len(), &mut self.tape),
+                        _ => vec![go_in],
+                    };
+                    for (ii, edge) in node.edges.iter().enumerate() {
+                        let mut x = node.weights[ii + 1].mul(&mut go_in[ii], &mut self.tape);
+                        let running_value = &mut running_values[*edge];
+                        running_values[*edge] = match running_value {
+                            Some(rv) => Some(x.add(rv, &mut self.tape)),
+                            None => Some(x),
+                        }
+                    }
+                }
+                NodeKind::Leaf => {
+                    // NOTE: This can panic as not every leaf is guaranteed a edge
+                    let val = std::mem::replace(&mut running_values[i], None);
+                    output[nodes_len - i - 1] = val.unwrap();
+                }
+            }
+        }
         output
     }
 
@@ -316,6 +398,34 @@ impl<const N: usize> Network<N> {
         for n in self.nodes.iter_mut() {
             n.apply_gradients(&mut grads);
         }
+    }
+
+    pub fn write(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let mut write_out: Vec<(NodeKind, Vec<usize>, Vec<f64>)> = Vec::new();
+        for n in &self.nodes {
+            write_out.push((
+                n.kind,
+                n.edges.clone(),
+                n.weights.iter().map(|w| w.data).collect(),
+            ));
+        }
+        let write_out = serde_json::to_string(&write_out)?;
+        // let path: String = format!(
+        //     "layers/{}",
+        //     SystemTime::now()
+        //         .duration_since(UNIX_EPOCH)
+        //         .unwrap()
+        //         .as_secs()
+        // );
+        // DirBuilder::new().recursive(true).create(path).unwrap();
+
+        let mut file = File::create(path)?;
+        write!(file, "{}", write_out);
+        //
+        // for i in 0..self.nodes.len() {
+        //     writeln!(file, "{}", self.nodes[i].to_string())?;
+        // }
+        Ok(())
     }
 }
 
@@ -421,6 +531,26 @@ impl<const N: usize> Node<N> {
             }
         }
     }
+
+    fn to_string(&self) -> String {
+        let mut string = String::new();
+        let k = match &self.kind {
+            NodeKind::Input => 'I',
+            NodeKind::Normal => 'N',
+            NodeKind::Leaf => 'L',
+        };
+        string.push(k);
+        let mut weights_skip = 0;
+        if self.kind == NodeKind::Normal {
+            string.push_str(&format!("{}|", self.weights[0].data));
+            weights_skip = 1;
+        }
+        self.edges
+            .iter()
+            .zip(self.weights.iter().skip(weights_skip))
+            .for_each(|(e, w)| string.push_str(&format!("{}|{}", e, w.data)));
+        string
+    }
 }
 
 #[cfg(test)]
@@ -429,7 +559,7 @@ mod tests {
 
     #[test]
     fn test_add_edge() {
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.insert_node(NodeKind::Input, 0);
         network.insert_node(NodeKind::Normal, 1);
         network.add_edge(0, 1);
@@ -439,7 +569,7 @@ mod tests {
 
     #[test]
     fn test_add_random_edge() {
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.insert_node(NodeKind::Input, 0);
         network.insert_node(NodeKind::Normal, 1);
         network.insert_node(NodeKind::Normal, 2);
@@ -452,7 +582,7 @@ mod tests {
 
     #[test]
     fn test_add_random_edge_to() {
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.insert_node(NodeKind::Input, 0);
         network.insert_node(NodeKind::Input, 1);
         network.insert_node(NodeKind::Normal, 2);
@@ -468,7 +598,7 @@ mod tests {
 
     #[test]
     fn remove_edge() {
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.insert_node(NodeKind::Input, 0);
         network.insert_node(NodeKind::Leaf, 1);
         network.add_edge(0, 1);
@@ -480,7 +610,7 @@ mod tests {
     #[test]
     fn remove_node_with_no_edges_to_it() {
         // Base
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.insert_node(NodeKind::Input, 0);
         network.insert_node(NodeKind::Normal, 1);
         network.add_edge(0, 1);
@@ -488,7 +618,7 @@ mod tests {
         assert_eq!(network.nodes[0].edges.len(), 0);
         assert_eq!(network.nodes.len(), 1);
         // Base with correct shifts
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.insert_node(NodeKind::Input, 0);
         network.insert_node(NodeKind::Normal, 1);
         network.insert_node(NodeKind::Normal, 2);
@@ -499,7 +629,7 @@ mod tests {
         network.remove_edge(0, 1);
         assert_eq!(network.nodes[0].edges, vec![1, 2]);
         // Recursive remove
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.insert_node(NodeKind::Input, 0);
         network.insert_node(NodeKind::Normal, 1);
         network.insert_node(NodeKind::Normal, 2);
@@ -514,7 +644,7 @@ mod tests {
         assert_eq!(network.nodes.len(), 2);
         assert_eq!(network.nodes[1].id, id_before);
         // Recursive remove test 2
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.insert_node(NodeKind::Input, 0);
         network.insert_node(NodeKind::Normal, 1);
         network.insert_node(NodeKind::Normal, 2);
@@ -533,13 +663,13 @@ mod tests {
     #[test]
     fn test_add_nodes() {
         // Base network with no normal nodes
-        let mut network: Network<10> = Network::default();
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.input_connectivity_chance = 1.0;
         network.add_nodes(NodeKind::Leaf, 10);
         network.add_nodes(NodeKind::Input, 10);
         assert_eq!(network.get_edge_count(), 10);
-        // Network with normal nodes
-        let mut network: Network<10> = Network::default();
+        // ChaosNetwork with normal nodes
+        let mut network: ChaosNetwork<0, 10, 0> = ChaosNetwork::default();
         network.input_connectivity_chance = 1.0;
         network.add_nodes(NodeKind::Leaf, 10);
         network.add_nodes(NodeKind::Input, 10);
@@ -578,7 +708,7 @@ mod tests {
 
     #[test]
     fn test_new_network() {
-        let network: Network<10> = Network::new(10, 10);
+        let network: ChaosNetwork<10, 10, 10> = ChaosNetwork::new(10, 10);
         assert_eq!(network.inputs_count, 10);
         assert_eq!(network.leaves_count, 10);
     }

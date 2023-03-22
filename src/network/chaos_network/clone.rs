@@ -1,7 +1,6 @@
-use crate::gradients::Tape;
-use crate::network::Network;
+use crate::network::ChaosNetwork;
 
-impl<const N: usize> Clone for Network<N> {
+impl<const I: usize, const O: usize, const N: usize> Clone for ChaosNetwork<I, O, N> {
     fn clone(&self) -> Self {
         Self {
             inputs_count: self.inputs_count,

@@ -1,4 +1,4 @@
-use crate::network::{Network, Node};
+use crate::network::{ChaosNetwork, Node};
 use std::fmt;
 
 impl<const N: usize> fmt::Debug for Node<N> {
@@ -7,12 +7,12 @@ impl<const N: usize> fmt::Debug for Node<N> {
     }
 }
 
-impl<const N: usize> fmt::Debug for Network<N> {
+impl<const I: usize, const O: usize, const N: usize> fmt::Debug for ChaosNetwork<I, O, N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
             "
-Network:
+ChaosNetwork:
     - input_nodes: {}
     - normal nodes: {}
     - leaves: {}

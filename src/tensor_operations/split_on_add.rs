@@ -2,11 +2,11 @@ use crate::gradients::Tape;
 use crate::tensors::{element_wise_addition, Tensor1D, WithTape};
 
 pub trait Tensor1DSplitOnAdd<const N: usize, TensorTape1> {
-    fn split_on_add(self, count: usize, tape: &mut Tape<N>) -> Vec<Tensor1D<N, TensorTape1>>;
+    fn split_on_add(&self, count: usize, tape: &mut Tape<N>) -> Vec<Tensor1D<N, TensorTape1>>;
 }
 
 impl<const N: usize> Tensor1DSplitOnAdd<N, WithTape> for Tensor1D<N, WithTape> {
-    fn split_on_add(self, count: usize, tape: &mut Tape<N>) -> Vec<Tensor1D<N, WithTape>> {
+    fn split_on_add(&self, count: usize, tape: &mut Tape<N>) -> Vec<Tensor1D<N, WithTape>> {
         let mut new_tensors: Vec<Tensor1D<N, WithTape>> =
             (0..count).map(|_i| Self::new(self.data)).collect();
 
