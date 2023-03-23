@@ -6,7 +6,10 @@ use rand::prelude::*;
 use rayon::prelude::*;
 use termion::input::TermRead;
 
-const MORPHS_PER_ITERATION: usize = 32;
+use crate::network::HeadNetwork;
+
+const MORPHS_PER_ITERATION: usize = 1;
+const CHAOS_NETWORK_OUTPUTS: usize = 100;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
@@ -123,28 +126,50 @@ fn prune<const I: usize, const O: usize, const N: usize>(
     network.remove_weighted_edges(edges_to_remove);
 }
 
-fn train_next_batch<const I: usize, const O: usize, const N: usize>(
-    network: &mut ChaosNetwork<I, O, N>,
-    train_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; I]>),
+fn train_next_batch<const CI: usize, const CO: usize, const HO: usize, const N: usize>(
+    chaos_network: &mut ChaosNetwork<CI, CO, N>,
+    head_network: &mut HeadNetwork<CO, HO, N>,
+    train_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; CI]>),
 ) {
     let (labels, inputs) = train_data;
-    let outputs = network.forward_batch(inputs);
-    let _loss = &mut Tensor1D::nll(outputs, labels, &mut network.tape);
-    network.execute_and_apply_gradients();
+    let outputs = chaos_network.forward_batch(inputs);
+    let output_ids: Vec<usize> = outputs.iter().map(|t| t.id).collect();
+    let outputs = head_network.forward_batch(outputs);
+    let (_losses, nll_grads) = HeadNetwork::<CO, HO, N>::nll(outputs, labels);
+    let (head_network_grads, chaos_network_outputs_grads) = head_network.backwards(&nll_grads);
+    head_network.apply_gradients(&head_network_grads);
+    output_ids
+        .into_iter()
+        .zip(chaos_network_outputs_grads.into_iter())
+        .for_each(|(id, grads)| {
+            chaos_network.tape.add_operation((
+                usize::MAX,
+                Box::new(move |g| {
+                    g.insert(id, Tensor1D::new(grads));
+                }),
+            ));
+        });
+    chaos_network.execute_and_apply_gradients();
+
+    // let outputs = chaos_network.forward_batch(inputs);
+    // let _loss = &mut Tensor1D::nll(outputs, labels, &mut chaos_network.tape);
+    // chaos_network.execute_and_apply_gradients();
 }
 
-fn validate_next_batch<const I: usize, const O: usize, const N: usize>(
-    network: &mut ChaosNetwork<I, O, N>,
-    test_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; I]>),
+fn validate_next_batch<const CI: usize, const CO: usize, const HO: usize, const N: usize>(
+    chaos_network: &mut ChaosNetwork<CI, CO, N>,
+    head_network: &mut HeadNetwork<CO, HO, N>,
+    test_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; CI]>),
 ) -> f64 {
     let (labels, inputs) = test_data;
-    let outputs = network.forward_batch_no_grad(inputs);
+    let outputs = chaos_network.forward_batch_no_grad(inputs);
+    let outputs = head_network.forward_batch_no_grad(outputs);
     let guesses: Vec<usize> = (0..N)
         .map(|i| {
-            let mut max: (usize, f64) = (0, outputs[0].data[i]);
-            for ii in 0..network.leaves_count {
-                if outputs[ii].data[i] > max.1 {
-                    max = (ii, outputs[ii].data[i]);
+            let mut max: (usize, f64) = (0, outputs[0][i]);
+            for ii in 0..HO {
+                if outputs[ii][i] > max.1 {
+                    max = (ii, outputs[ii][i]);
                 }
             }
             max.0
@@ -162,8 +187,10 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
     pub fn train(&mut self) {
         let mut stdin = termion::async_stdin();
         let mut size_weight = 0.075;
-        let mut current_network: ChaosNetwork<I, O, N> = ChaosNetwork::new(I, 100);
-        // let mut head: ChaosNetwork<I, O, N> = ChaosNetwork::new_fully_connected(100, O);
+        let mut current_chaos_network: ChaosNetwork<I, CHAOS_NETWORK_OUTPUTS, N> =
+            ChaosNetwork::new(I, CHAOS_NETWORK_OUTPUTS);
+        let mut current_head_network: HeadNetwork<CHAOS_NETWORK_OUTPUTS, O, N> =
+            HeadNetwork::default();
 
         // Do the actual training
         for training_step in 0..self.max_training_steps {
@@ -190,53 +217,62 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                 .collect();
 
             // Do it!
-            current_network = if training_step % 10 == 0 {
-                let new_networks: Vec<(ChaosNetwork<I, O, N>, f64)> = (0..MORPHS_PER_ITERATION)
+            (current_chaos_network, current_head_network) = if training_step % 10 == 0 {
+                let new_networks: Vec<(
+                    ChaosNetwork<I, CHAOS_NETWORK_OUTPUTS, N>,
+                    HeadNetwork<CHAOS_NETWORK_OUTPUTS, O, N>,
+                    f64,
+                )> = (0..MORPHS_PER_ITERATION)
                     .into_par_iter()
                     .map(|_i| {
-                        let mut network = if training_step != 0 {
-                            let mut network = current_network.clone();
+                        let mut chaos_network = if training_step != 0 {
+                            let mut network = current_chaos_network.clone();
                             let mut rng = rand::thread_rng();
                             let percent_nodes_to_add = rng.gen::<f64>() / 50.;
                             let percent_edges_to_add = rng.gen::<f64>() / 25.;
                             let percent_edges_to_remove = rng.gen::<f64>() / 10.;
-                            prune(&mut network, percent_edges_to_remove);
-                            grow(&mut network, percent_nodes_to_add, percent_edges_to_add);
+                            // prune(&mut network, percent_edges_to_remove);
+                            // grow(&mut network, percent_nodes_to_add, percent_edges_to_add);
                             network
                         } else {
-                            ChaosNetwork::new(I, O)
+                            ChaosNetwork::new(I, CHAOS_NETWORK_OUTPUTS)
                         };
-                        batch_train_data
-                            .iter()
-                            .for_each(|batch| train_next_batch(&mut network, batch));
+                        let mut head_network = current_head_network.clone();
+                        batch_train_data.iter().for_each(|batch| {
+                            train_next_batch(&mut chaos_network, &mut head_network, batch)
+                        });
                         let average_validation_accuracy: f64 = batch_test_data
                             .iter()
-                            .map(|step| validate_next_batch(&mut network, step))
+                            .map(|step| {
+                                validate_next_batch(&mut chaos_network, &mut head_network, step)
+                            })
                             .sum::<f64>()
                             / (self.validation_steps as f64);
-                        (network, average_validation_accuracy)
+                        (chaos_network, head_network, average_validation_accuracy)
                     })
                     .collect();
 
                 // Sort the new networks
                 let network_sizes: Vec<f64> = new_networks
                     .iter()
-                    .map(|(n, _)| n.get_edge_count() as f64)
+                    .map(|(n, _, _)| n.get_edge_count() as f64)
                     .collect();
                 let min_network_size = network_sizes
                     .iter()
                     .min_by(|a, b| a.partial_cmp(b).unwrap())
                     .unwrap();
-                let (new_network, average_validation_accuracy, score): (
-                    ChaosNetwork<I, O, N>,
+                let (new_chaos_network, new_head_network, average_validation_accuracy, score): (
+                    ChaosNetwork<I, CHAOS_NETWORK_OUTPUTS, N>,
+                    HeadNetwork<CHAOS_NETWORK_OUTPUTS, O, N>,
                     f64,
                     f64,
                 ) = new_networks
                     .into_iter()
-                    .map(|(n, ava)| {
+                    .map(|(n, h, ava)| {
                         let edge_count = n.get_edge_count() as f64;
                         (
                             n,
+                            h,
                             ava,
                             ava + ((min_network_size / edge_count) * size_weight),
                         )
@@ -245,14 +281,14 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                     .unwrap();
                 println!(
                     "AVA: {} | Score: {}{:?}",
-                    average_validation_accuracy, score, new_network
+                    average_validation_accuracy, score, new_chaos_network
                 );
-                new_network
+                (new_chaos_network, new_head_network)
             } else {
-                batch_train_data
-                    .iter()
-                    .for_each(|batch| train_next_batch(&mut current_network, batch));
-                current_network
+                batch_train_data.iter().for_each(|batch| {
+                    train_next_batch(&mut current_chaos_network, &mut current_head_network, batch)
+                });
+                (current_chaos_network, current_head_network)
             };
 
             // Match user input
