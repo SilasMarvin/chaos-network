@@ -159,6 +159,7 @@ mod tests {
     use super::*;
 
     #[test]
+    // NOTE compare output to results of test_forward_batch in python-tests tests/head_network.py
     fn test_forward_batch() {
         // let mut network: HeadNetwork<2, 2, 1> = HeadNetwork {
         //     weights: [[0.1, 0.2], [0.3, 0.4]],
