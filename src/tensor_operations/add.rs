@@ -1,5 +1,5 @@
 use crate::gradients::Tape;
-use crate::tensors::{element_wise_addition, Tensor1D, WithTape, WithoutTape};
+use crate::tensors::{element_wise_addition, Tensor0D, Tensor1D, WithTape, WithoutTape};
 
 pub trait Tensor1DAdd<const N: usize, TensorTape1, TensorTape2> {
     fn add(
@@ -7,6 +7,53 @@ pub trait Tensor1DAdd<const N: usize, TensorTape1, TensorTape2> {
         left: &mut Tensor1D<N, TensorTape1>,
         tape: &mut Tape<N>,
     ) -> Tensor1D<N, TensorTape2>;
+}
+
+pub trait Tensor0DAdd<const N: usize, TensorTape1, TensorTape2> {
+    fn add(
+        &mut self,
+        left: &mut Tensor1D<N, TensorTape1>,
+        tape: &mut Tape<N>,
+    ) -> Tensor1D<N, TensorTape2>;
+}
+
+impl<const N: usize> Tensor0DAdd<N, WithTape, WithTape> for Tensor0D<N, WithTape> {
+    fn add(
+        &mut self,
+        other: &mut Tensor1D<N, WithTape>,
+        tape: &mut Tape<N>,
+    ) -> Tensor1D<N, WithTape> {
+        let new_data: [f64; N] = other.data.map(|d| self.data + d);
+        let mut new = Tensor1D::new(new_data);
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
+        // Add operation to tape
+        let self_id = self.grad_for;
+        let other_id = other.grad_for;
+        let new_id = new.grad_for;
+        tape.add_operation((
+            new_id,
+            Box::new(move |g| {
+                let tg1 = g.remove(new_id);
+                let tg2 = tg1.clone();
+                g.insert(self_id, tg1);
+                g.insert(other_id, tg2);
+            }),
+        ));
+
+        new
+    }
+}
+
+impl<const N: usize> Tensor0DAdd<N, WithoutTape, WithoutTape> for Tensor0D<N, WithTape> {
+    fn add(
+        &mut self,
+        other: &mut Tensor1D<N, WithoutTape>,
+        _tape: &mut Tape<N>,
+    ) -> Tensor1D<N, WithoutTape> {
+        let new_data: [f64; N] = other.data.map(|d| self.data + d);
+        let new = Tensor1D::new(new_data);
+        new
+    }
 }
 
 impl<const N: usize> Tensor1DAdd<N, WithoutTape, WithTape> for Tensor1D<N, WithTape> {

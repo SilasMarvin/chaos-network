@@ -16,7 +16,9 @@ use std::writeln;
 use crate::gradients::Gradients;
 use crate::gradients::Tape;
 use crate::network::{AdamOptimizer, Optimizer};
-use crate::tensor_operations::{Tensor0DMul, Tensor1DAdd, Tensor1DMish, Tensor1DSplitOnAdd};
+use crate::tensor_operations::{
+    Tensor0DAdd, Tensor0DMul, Tensor1DAdd, Tensor1DMish, Tensor1DSplitOnAdd,
+};
 use crate::tensors::{Tensor0D, Tensor1D, WithTape, WithoutTape};
 
 pub static NODE_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -59,11 +61,6 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         network.input_connectivity_chance = 0.1;
         network.add_nodes(NodeKind::Leaf, outputs);
         network.add_nodes(NodeKind::Input, inputs);
-        network
-    }
-
-    pub fn new_fully_connected(inputs: usize, outputs: usize) -> Self {
-        let mut network: ChaosNetwork<I, O, N> = ChaosNetwork::default();
         network
     }
 
@@ -232,13 +229,7 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                 NodeKind::Normal => {
                     let running_value = &mut running_values[i];
                     let mut go_in = match running_value.as_mut() {
-                        Some(mut rv) => {
-                            let mut bias = node.weights[0].mul_left_by_reference(
-                                &Tensor1D::<N, WithoutTape>::new([1.; N]),
-                                &mut self.tape,
-                            );
-                            bias.add(&mut rv, &mut self.tape)
-                        }
+                        Some(mut rv) => node.weights[0].add(&mut rv, &mut self.tape),
                         None => {
                             panic!("We should not be at a normal node that does not have a running value");
                         }
@@ -258,9 +249,10 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                     }
                 }
                 NodeKind::Leaf => {
-                    // NOTE: This can panic as not every leaf is guaranteed a edge
-                    let val = std::mem::replace(&mut running_values[i], None);
-                    output[nodes_len - i - 1] = val.unwrap();
+                    let mut val = std::mem::replace(&mut running_values[i], None).unwrap();
+                    let mut val = node.weights[0].add(&mut val, &mut self.tape);
+                    let val = val.mish(&mut self.tape);
+                    output[nodes_len - i - 1] = val;
                 }
             }
         }
@@ -295,13 +287,7 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                 NodeKind::Normal => {
                     let running_value = &mut running_values[i];
                     let mut go_in = match running_value.as_mut() {
-                        Some(mut rv) => {
-                            let mut bias = node.weights[0].mul_explicit_no_grad(
-                                &mut Tensor1D::<N, WithoutTape>::new([1.; N]),
-                                &mut self.tape,
-                            );
-                            bias.add(&mut rv, &mut self.tape)
-                        }
+                        Some(mut rv) => node.weights[0].add(&mut rv, &mut self.tape),
                         None => panic!(
                             "We should not be at a normal node that does not have a running value"
                         ),
@@ -318,8 +304,10 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                     }
                 }
                 NodeKind::Leaf => {
-                    let val = std::mem::replace(&mut running_values[i], None);
-                    output[nodes_len - i - 1] = val.unwrap();
+                    let mut val = std::mem::replace(&mut running_values[i], None).unwrap();
+                    let mut val = node.weights[0].add(&mut val, &mut self.tape);
+                    let val = val.mish(&mut self.tape);
+                    output[nodes_len - i - 1] = val;
                 }
             }
         }
@@ -365,7 +353,7 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
 impl<const N: usize> Node<N> {
     fn new(kind: NodeKind, tape: &mut Tape<N>) -> Self {
         match kind {
-            NodeKind::Normal => {
+            NodeKind::Normal | NodeKind::Leaf => {
                 let mut node = Self {
                     id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                     weights: Vec::new(),
@@ -374,20 +362,10 @@ impl<const N: usize> Node<N> {
                     kind,
                     optimizer: Box::new(AdamOptimizer::default()),
                 };
-                // Normal nodes have a bias
                 node.add_weight(tape);
                 node
             }
-            NodeKind::Input => Self {
-                id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
-                weights: Vec::new(),
-                edges: Vec::new(),
-                edges_to_count: 0,
-
-                kind,
-                optimizer: Box::new(AdamOptimizer::default()),
-            },
-            NodeKind::Leaf => Self {
+            _ => Self {
                 id: NODE_COUNT.fetch_add(1, Ordering::SeqCst),
                 weights: Vec::new(),
                 edges: Vec::new(),
@@ -631,7 +609,7 @@ mod tests {
     //     assert_eq!(network.get_edge_count(), 30);
     //     // Make sure all of the old ids are still present in the input nodes connections
     //     ids_of_connected_nodes_before
-    //         .into_iter()
+
     //         .zip(ids_of_connected_nodes_after.into_iter())
     //         .for_each(|(b, a)| {
     //             b.into_iter()
