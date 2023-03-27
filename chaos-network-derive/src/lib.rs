@@ -1,6 +1,5 @@
 use proc_macro::TokenStream;
 
-// use chaos_network::NodeKind;
 use quote::{format_ident, quote, quote_spanned};
 use serde::Deserialize;
 use syn::parse::{Parse, ParseStream};
@@ -104,6 +103,11 @@ pub fn build_forward(input: TokenStream) -> TokenStream {
     let mut weight_index = 0;
     let mut ret = Vec::new();
     let mut leaves_count: usize = 0;
+    ret.push(quote! {
+        fn do_mish(x: f64) -> f64 {
+            x * ((1. + x.exp()).ln()).tanh()
+        }
+    });
     for (i, (kind, edges, _)) in dn.into_iter().enumerate() {
         if kind == NodeKind::Input {
             // Setup further edges
@@ -126,7 +130,6 @@ pub fn build_forward(input: TokenStream) -> TokenStream {
                             }
                         } else {
                             let varname = format_ident!("x{}", node_index);
-
                             quote! {
                                 #varname * #weights_ident[#weight_index]
                             }
@@ -134,8 +137,10 @@ pub fn build_forward(input: TokenStream) -> TokenStream {
                     });
             // Make sure we account for the bias
             let varname = format_ident!("x{}", i);
+            let pre_mish_varname = format_ident!("pre_mish{}", i);
             ret.push(quote! {
-                let #varname = #(#adds)+* + #weights_ident[weight_index];
+                let #pre_mish_varname = #(#adds)+* + #weights_ident[#weight_index];
+                let #varname = do_mish(#pre_mish_varname);
             });
             weight_index += 1;
             // Setup further edges
@@ -165,11 +170,12 @@ pub fn build_forward(input: TokenStream) -> TokenStream {
                     .collect(),
                 None => Vec::new(),
             };
-            if !adds.is_empty() {
-                ret.push(quote! {
-                    #ret_ident[#leaves_count] = #(#adds)+*;
-                });
-            }
+            let pre_mish_varname = format_ident!("pre_mish{}", i);
+            ret.push(quote! {
+                let #pre_mish_varname = #(#adds)+* + #weights_ident[#weight_index];
+                #ret_ident[#leaves_count] = do_mish(#pre_mish_varname);
+            });
+            weight_index += 1;
             leaves_count += 1;
         }
     }
@@ -177,8 +183,6 @@ pub fn build_forward(input: TokenStream) -> TokenStream {
     TokenStream::from(quote! {
         #(#ret)*
     })
-
-    // "fn forward() -> u32 { 42 }".parse().unwrap()
 }
 
 struct BuildBackwardsArgs {
@@ -288,10 +292,11 @@ pub fn build_backwards(input_token_stream: TokenStream) -> TokenStream {
                 weight_index += 1;
             });
             // Insert this stuff and continue
+            let pre_mish_varname = format_ident!("pre_mish{}", i);
             ret.insert(
                 0,
                 quote! {
-                    let #dx_varname = #(#dx_varbuilder)+*;
+                    let #dx_varname = do_mish_backward(#pre_mish_varname) * (#(#dx_varbuilder)+*);
                     #weight_grads_ident[#bias_index] = #dx_varname; // The bias
                     #(#adds)*
                 },
@@ -316,22 +321,29 @@ pub fn build_backwards(input_token_stream: TokenStream) -> TokenStream {
                     .collect(),
                 None => Vec::new(),
             };
-            if !adds.is_empty() {
-                ret.insert(
-                    0,
-                    quote! {
-                        let #dx_varname = #output_grads_ident[#leaves_count];
-                        #(#adds)*
-                    },
-                );
-            }
+            let pre_mish_varname = format_ident!("pre_mish{}", i);
+            ret.insert(
+                0,
+                quote! {
+                    let #dx_varname = do_mish_backward(#pre_mish_varname) * #output_grads_ident[#leaves_count];
+                    #weight_grads_ident[#weight_index] = #dx_varname;
+                    #(#adds)*
+                },
+            );
+            weight_index += 1;
             leaves_count += 1;
         }
     }
 
+    ret.insert(0, quote! {
+        fn do_mish_backward(x: f64) -> f64 {
+            let w = (4. * (x + 1.)) + (4. * (2. * x).exp()) + (3. * x).exp() + (x.exp() * ((4. * x) + 6.));
+            let d = (2. * x.exp()) + (2. * x).exp() + 2.;
+            (x.exp() * w) / (d * d)
+        }
+    });
+
     TokenStream::from(quote! {
         #(#ret)*
     })
-
-    // "fn forward() -> u32 { 42 }".parse().unwrap()
 }
