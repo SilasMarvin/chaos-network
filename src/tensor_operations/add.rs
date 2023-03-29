@@ -62,7 +62,7 @@ impl<const N: usize> Tensor1DAdd<N, WithoutTape, WithTape> for Tensor1D<N, WithT
         other: &mut Tensor1D<N, WithoutTape>,
         _tape: &mut Tape<N>,
     ) -> Tensor1D<N, WithTape> {
-        let new_data = element_wise_addition(&self.data, &other.data);
+        let new_data = *element_wise_addition(&self.data, &other.data);
         let mut new = Tensor1D::new(new_data);
         new.grad_for = self.id;
         new
@@ -75,7 +75,7 @@ impl<const N: usize> Tensor1DAdd<N, WithTape, WithTape> for Tensor1D<N, WithTape
         other: &mut Tensor1D<N, WithTape>,
         tape: &mut Tape<N>,
     ) -> Tensor1D<N, WithTape> {
-        let new_data = element_wise_addition(&self.data, &other.data);
+        let new_data = *element_wise_addition(&self.data, &other.data);
         let mut new = Tensor1D::new(new_data);
         new.set_id_grad_for(tape.get_next_temporary_tensor_id());
         // Add operation to tape
@@ -102,7 +102,7 @@ impl<const N: usize> Tensor1DAdd<N, WithoutTape, WithoutTape> for Tensor1D<N, Wi
         other: &mut Tensor1D<N, WithoutTape>,
         _tape: &mut Tape<N>,
     ) -> Tensor1D<N, WithoutTape> {
-        let new_data = element_wise_addition(&self.data, &other.data);
+        let new_data = *element_wise_addition(&self.data, &other.data);
         Tensor1D::new(new_data)
     }
 }

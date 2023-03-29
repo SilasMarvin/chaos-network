@@ -38,7 +38,7 @@ impl<const N: usize> Tensor0DMul<N, WithoutTape, WithTape> for Tensor0D<N, WithT
             new_id,
             Box::new(move |g| {
                 let mut tg = g.remove(new_id);
-                tg.data = element_wise_mul::<N>(&tg.data, &other_data);
+                tg.data = *element_wise_mul::<N>(&tg.data, &other_data);
                 g.insert(self_id, tg);
             }),
         ));
@@ -62,7 +62,7 @@ impl<const N: usize> Tensor0DMul<N, WithoutTape, WithTape> for Tensor0D<N, WithT
             new_id,
             Box::new(move |g| {
                 let mut tg = g.remove(new_id);
-                tg.data = element_wise_mul::<N>(&tg.data, &other_data);
+                tg.data = *element_wise_mul::<N>(&tg.data, &other_data);
                 g.insert(self_id, tg);
             }),
         ));
@@ -100,7 +100,7 @@ impl<const N: usize> Tensor0DMul<N, WithTape, WithTape> for Tensor0D<N, WithTape
             Box::new(move |g| {
                 let mut tg1 = g.remove(new_id);
                 let mut tg2 = tg1.clone();
-                tg1.data = element_wise_mul::<N>(&tg1.data, &other_data);
+                tg1.data = *element_wise_mul::<N>(&tg1.data, &other_data);
                 tg2.data = tg2.data.map(|x| x * self_data);
                 g.insert(self_id, tg1);
                 g.insert(other_id, tg2);

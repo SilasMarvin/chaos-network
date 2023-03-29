@@ -22,16 +22,18 @@ pub fn build_weights(input_token_stream: TokenStream) -> TokenStream {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
-                quote_spanned! { ast.span() =>  compile_error!("build_weights requires a LitInt") },
-            )
+                // quote_spanned! { ast.span() =>  compile_error!("build_weights requires a LitInt") },
+                quote! { vec![] },
+            );
         }
     };
     let network_json = match read_to_string(format!("networks/{}/1.json", file_dir)) {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
-                quote_spanned! { ast.span() =>  compile_error!("The requested networks file does not exist") },
-            )
+                // quote_spanned! { ast.span() =>  compile_error!("The requested networks file does not exist") },
+                quote! { vec![] },
+            );
         }
     };
     let dn: Vec<(NodeKind, Vec<usize>, Vec<f64>)> = match serde_json::from_str(&network_json) {
@@ -86,16 +88,18 @@ pub fn build_forward(input: TokenStream) -> TokenStream {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
-                quote_spanned! { weights_ident.span() =>  compile_error!("The requested networks file does not exist") },
-            )
+                // quote_spanned! { weights_ident.span() =>  compile_error!("The requested networks file does not exist") },
+                quote! {},
+            );
         }
     };
     let dn: Vec<(NodeKind, Vec<usize>, Vec<f64>)> = match serde_json::from_str(&network_json) {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
-                quote_spanned! { weights_ident.span() =>  compile_error!("The networks file is not valid json") },
-            )
+                // quote_spanned! { weights_ident.span() =>  compile_error!("The networks file is not valid json") },
+                quote! {},
+            );
         }
     };
 
@@ -171,8 +175,16 @@ pub fn build_forward(input: TokenStream) -> TokenStream {
                 None => Vec::new(),
             };
             let pre_mish_varname = format_ident!("pre_mish{}", i);
+            ret.push(if adds.is_empty() {
+                quote! {
+                    let #pre_mish_varname = #weights_ident[#weight_index];
+                }
+            } else {
+                quote! {
+                    let #pre_mish_varname = #(#adds)+* + #weights_ident[#weight_index];
+                }
+            });
             ret.push(quote! {
-                let #pre_mish_varname = #(#adds)+* + #weights_ident[#weight_index];
                 #ret_ident[#leaves_count] = do_mish(#pre_mish_varname);
             });
             weight_index += 1;
@@ -229,16 +241,18 @@ pub fn build_backwards(input_token_stream: TokenStream) -> TokenStream {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
-                quote_spanned! { weights_ident.span() =>  compile_error!("The requested networks file does not exist") },
-            )
+                // quote_spanned! { weights_ident.span() =>  compile_error!("The requested networks file does not exist") },
+                quote! {},
+            );
         }
     };
     let dn: Vec<(NodeKind, Vec<usize>, Vec<f64>)> = match serde_json::from_str(&network_json) {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
-                quote_spanned! { weights_ident.span() =>  compile_error!("The networks file is not valid json") },
-            )
+                // quote_spanned! { weights_ident.span() =>  compile_error!("The networks file is not valid json") },
+                quote! {},
+            );
         }
     };
 
@@ -261,20 +275,22 @@ pub fn build_backwards(input_token_stream: TokenStream) -> TokenStream {
                 });
         } else if kind == NodeKind::Normal {
             let dx_varname = format_ident!("dx{}", i);
-            let adds = ke.remove(&i).unwrap().into_iter().map(
-                |(node_index, kind, weight_index)| {
-                    if kind == NodeKind::Input {
-                        quote! {
-                            #weight_grads_ident[#weight_index] = #input_ident[#node_index] * #dx_varname;
+            let adds =
+                ke.remove(&i)
+                    .unwrap()
+                    .into_iter()
+                    .map(|(node_index, kind, weight_index)| {
+                        if kind == NodeKind::Input {
+                            quote! {
+                                #weight_grads_ident[#weight_index] = #input_ident[#node_index] * #dx_varname;
+                            }
+                        } else {
+                            let varname = format_ident!("x{}", node_index);
+                            quote! {
+                                #weight_grads_ident[#weight_index] = #varname * #dx_varname;
+                            }
                         }
-                    } else {
-                        let varname = format_ident!("x{}", node_index);
-                        quote! {
-                            #weight_grads_ident[#weight_index] = #varname * #dx_varname;
-                        }
-                    }
-                },
-            );
+                    });
             // Include the bias, it is manually inserted below
             let bias_index = weight_index;
             weight_index += 1;
@@ -296,7 +312,8 @@ pub fn build_backwards(input_token_stream: TokenStream) -> TokenStream {
             ret.insert(
                 0,
                 quote! {
-                    let #dx_varname = do_mish_backward(#pre_mish_varname) * (#(#dx_varbuilder)+*);
+                    // let #dx_varname = do_mish_backward(#pre_mish_varname) * (#(#dx_varbuilder)+*);
+                    let #dx_varname = 5.;
                     #weight_grads_ident[#bias_index] = #dx_varname; // The bias
                     #(#adds)*
                 },

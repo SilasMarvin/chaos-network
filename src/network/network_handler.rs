@@ -1,5 +1,5 @@
+use crate::build_order_network;
 use crate::network::ChaosNetwork;
-use crate::tensor_operations::Tensor1DNll;
 use crate::tensors::Tensor1D;
 use rand::distributions::Uniform;
 use rand::prelude::*;
@@ -7,13 +7,15 @@ use rayon::prelude::*;
 use termion::input::TermRead;
 
 use crate::network::HeadNetwork;
+use crate::network::OrderNetwork;
 
-const MORPHS_PER_ITERATION: usize = 1;
-const CHAOS_NETWORK_OUTPUTS: usize = 100;
+const MORPHS_PER_ITERATION: usize = 500;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
     ChangeSizeWeight,
+    Stop,
+    StopSave,
 }
 
 fn parse_input(inp: String) -> Result<(Action, f64), Box<dyn std::error::Error>> {
@@ -33,6 +35,8 @@ fn parse_input(inp: String) -> Result<(Action, f64), Box<dyn std::error::Error>>
             let num1 = split[1].parse::<f64>()?;
             Ok((Action::ChangeSizeWeight, num1))
         }
+        "s" => Ok((Action::Stop, 0.)),
+        "ss" => Ok((Action::StopSave, 0.)),
         _ => return Err(Box::<dyn std::error::Error>::from("Action not found")),
     }
 }
@@ -81,20 +85,37 @@ fn transform_train_data_for_chaos_network<const I: usize, const N: usize>(
     Box::new(ret)
 }
 
-pub struct StandardClassificationNetworkHandler<const I: usize, const O: usize, const N: usize> {
+pub struct StandardClassificationNetworkHandler<
+    const ON: usize,
+    const OI: usize,
+    const OO: usize,
+    const CI: usize,
+    const CO: usize,
+    const O: usize,
+    const N: usize,
+> {
     max_training_steps: usize,
     steps_per_training_step: usize,
-    train_data: RepeatingNetworkData<I, N>,
-    test_data: RepeatingNetworkData<I, N>,
+    train_data: RepeatingNetworkData<OI, N>,
+    test_data: RepeatingNetworkData<OI, N>,
     validation_steps: usize,
 }
 
-impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetworkHandler<I, O, N> {
+impl<
+        const ON: usize,
+        const OI: usize,
+        const OO: usize,
+        const CI: usize,
+        const CO: usize,
+        const O: usize,
+        const N: usize,
+    > StandardClassificationNetworkHandler<ON, OI, OO, CI, CO, O, N>
+{
     pub fn new(
         max_training_steps: usize,
         steps_per_training_step: usize,
-        train_data: RepeatingNetworkData<I, N>,
-        test_data: RepeatingNetworkData<I, N>,
+        train_data: RepeatingNetworkData<OI, N>,
+        test_data: RepeatingNetworkData<OI, N>,
         validation_steps: usize,
     ) -> Self {
         Self {
@@ -112,19 +133,20 @@ fn grow<const I: usize, const O: usize, const N: usize>(
     percent_nodes_to_add: f64,
     percent_edges_to_add: f64,
 ) {
-    let nodes_to_add = (network.nodes.len() as f64 * percent_nodes_to_add) as usize;
-    let edges_to_add = (network.get_edge_count() as f64 * percent_edges_to_add) as usize;
+    let nodes_to_add = ((network.nodes.len() as f64 * percent_nodes_to_add) as usize).max(1);
+    let edges_to_add = ((network.get_edge_count() as f64 * percent_edges_to_add) as usize).max(10);
     network.add_nodes(super::NodeKind::Normal, nodes_to_add);
     network.add_random_edges_for_random_nodes(edges_to_add);
 }
 
-fn prune<const I: usize, const O: usize, const N: usize>(
-    network: &mut ChaosNetwork<I, O, N>,
-    percent_edges_to_remove: f64,
-) {
-    let edges_to_remove = (network.get_edge_count() as f64 * percent_edges_to_remove) as usize;
-    network.remove_weighted_edges(edges_to_remove);
-}
+// fn prune<const I: usize, const O: usize, const N: usize>(
+//     network: &mut ChaosNetwork<I, O, N>,
+//     percent_edges_to_remove: f64,
+// ) {
+//     let edges_to_remove =
+//         ((network.get_edge_count() as f64 * percent_edges_to_remove) as usize).max(1);
+//     network.remove_weighted_edges(edges_to_remove);
+// }
 
 fn train_next_batch<const CI: usize, const CO: usize, const HO: usize, const N: usize>(
     chaos_network: &mut ChaosNetwork<CI, CO, N>,
@@ -183,19 +205,26 @@ fn validate_next_batch<const CI: usize, const CO: usize, const HO: usize, const 
     (correct as f64) / N as f64
 }
 
-impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetworkHandler<I, O, N> {
+impl<
+        const ON: usize,
+        const OI: usize,
+        const OO: usize,
+        const CI: usize,
+        const CO: usize,
+        const O: usize,
+        const N: usize,
+    > StandardClassificationNetworkHandler<ON, OI, OO, CI, CO, O, N>
+{
     pub fn train(&mut self) {
         let mut stdin = termion::async_stdin();
         let mut size_weight = 0.075;
-        let mut current_chaos_network: ChaosNetwork<I, CHAOS_NETWORK_OUTPUTS, N> =
-            ChaosNetwork::new(I, CHAOS_NETWORK_OUTPUTS);
-        let mut current_head_network: HeadNetwork<CHAOS_NETWORK_OUTPUTS, O, N> =
-            HeadNetwork::default();
+        let mut current_chaos_network: ChaosNetwork<OI, CO, N> = ChaosNetwork::new(CI, CO);
+        let mut current_head_network: HeadNetwork<CO, O, N> = HeadNetwork::default();
 
         // Do the actual training
         for training_step in 0..self.max_training_steps {
             // Prep the data
-            let batch_train_data: Vec<(Box<[usize; N]>, Box<[Tensor1D<N>; I]>)> = (0..self
+            let batch_train_data: Vec<(Box<[usize; N]>, Box<[Tensor1D<N>; OI]>)> = (0..self
                 .steps_per_training_step)
                 .map(|_i| {
                     let (train_labels, train_examples) = self.train_data.next();
@@ -205,7 +234,7 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                     )
                 })
                 .collect();
-            let batch_test_data: Vec<(Box<[usize; N]>, Box<[Tensor1D<N>; I]>)> = (0..self
+            let batch_test_data: Vec<(Box<[usize; N]>, Box<[Tensor1D<N>; OI]>)> = (0..self
                 .validation_steps)
                 .map(|_i| {
                     let (train_labels, train_examples) = self.test_data.next();
@@ -218,24 +247,21 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
 
             // Do it!
             (current_chaos_network, current_head_network) = if training_step % 10 == 0 {
-                let new_networks: Vec<(
-                    ChaosNetwork<I, CHAOS_NETWORK_OUTPUTS, N>,
-                    HeadNetwork<CHAOS_NETWORK_OUTPUTS, O, N>,
-                    f64,
-                )> = (0..MORPHS_PER_ITERATION)
+                let new_networks: Vec<(ChaosNetwork<OI, CO, N>, HeadNetwork<CO, O, N>, f64)> = (0
+                    ..MORPHS_PER_ITERATION)
                     .into_par_iter()
                     .map(|_i| {
                         let mut chaos_network = if training_step != 0 {
                             let mut network = current_chaos_network.clone();
-                            let mut rng = rand::thread_rng();
-                            let percent_nodes_to_add = rng.gen::<f64>() / 50.;
-                            let percent_edges_to_add = rng.gen::<f64>() / 25.;
-                            let percent_edges_to_remove = rng.gen::<f64>() / 10.;
+                            let percent_nodes_to_add = 0.001;
+                            let percent_edges_to_add = 0.001;
+                            // let percent_edges_to_remove = rng.gen::<f64>() / 500.;
                             // prune(&mut network, percent_edges_to_remove);
-                            // grow(&mut network, percent_nodes_to_add, percent_edges_to_add);
+                            grow(&mut network, percent_nodes_to_add, percent_edges_to_add);
                             network
                         } else {
-                            ChaosNetwork::new(I, CHAOS_NETWORK_OUTPUTS)
+                            // ChaosNetwork::new(OI, CO)
+                            current_chaos_network.clone()
                         };
                         let mut head_network = current_head_network.clone();
                         batch_train_data.iter().for_each(|batch| {
@@ -251,7 +277,6 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                         (chaos_network, head_network, average_validation_accuracy)
                     })
                     .collect();
-
                 // Sort the new networks
                 let network_sizes: Vec<f64> = new_networks
                     .iter()
@@ -262,8 +287,8 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                     .min_by(|a, b| a.partial_cmp(b).unwrap())
                     .unwrap();
                 let (new_chaos_network, new_head_network, average_validation_accuracy, score): (
-                    ChaosNetwork<I, CHAOS_NETWORK_OUTPUTS, N>,
-                    HeadNetwork<CHAOS_NETWORK_OUTPUTS, O, N>,
+                    ChaosNetwork<OI, CO, N>,
+                    HeadNetwork<CO, O, N>,
                     f64,
                     f64,
                 ) = new_networks
@@ -301,7 +326,14 @@ impl<const I: usize, const O: usize, const N: usize> StandardClassificationNetwo
                                 size_weight = num1;
                                 println!("\nUpdated Size Weight: {}\n", size_weight);
                             }
-                            _ => (),
+                            Action::Stop => return,
+                            Action::StopSave => {
+                                current_chaos_network
+                                    .write_to_new_dir()
+                                    .unwrap_or_else(|_err| panic!("Error saving chaos network"));
+                                println!("Chaos Network saved");
+                                return;
+                            }
                         },
                         Err(error) => println!("ERROR: {:?}", error),
                     }

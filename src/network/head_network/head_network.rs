@@ -51,9 +51,9 @@ impl<const I: usize, const O: usize, const N: usize> HeadNetwork<I, O, N> {
     // will be a lot more clear. I am sure there are better ways to do this, and unfortunately I
     // will probably have to revist this
     pub fn forward_batch(&mut self, input: Box<[Tensor1D<N, WithTape>; I]>) -> Box<[[f64; N]; O]> {
-        let mut ret = [[0.; N]; O];
+        let mut ret = Box::new([[0.; N]; O]);
 
-        let mut partial_weight_grads = [[[1.; N]; O]; I];
+        let mut partial_weight_grads = Box::new([[[1.; N]; O]; I]);
         for i in 0..O {
             for ii in 0..I {
                 for iii in 0..N {
@@ -80,7 +80,7 @@ impl<const I: usize, const O: usize, const N: usize> HeadNetwork<I, O, N> {
             (Box::new(weight_grads), Box::new(input_grads))
         }));
 
-        Box::new(ret)
+        ret
     }
 
     pub fn forward_batch_no_grad(&self, input: Box<[Tensor1D<N>; I]>) -> Box<[[f64; N]; O]> {
@@ -161,21 +161,6 @@ mod tests {
     #[test]
     // NOTE compare output to results of test_forward_batch in python-tests tests/head_network.py
     fn test_forward_batch() {
-        // let mut network: HeadNetwork<2, 2, 1> = HeadNetwork {
-        //     weights: [[0.1, 0.2], [0.3, 0.4]],
-        //     backwards: None,
-        // };
-        // let input: Box<[Tensor1D<1, WithTape>; 2]> =
-        //     Box::new([Tensor1D::new([0.1]), Tensor1D::new([0.2])]);
-        // let indices = [0];
-        // let outputs = network.forward_batch(input);
-        // let (loss, nll_grads) = HeadNetwork::<2, 2, 1>::nll(outputs, &indices);
-        // println!("Loss: {:?}", loss);
-        // println!("NLL Grads: {:?}", nll_grads);
-        // let (weight_grads, input_grads) = network.backwards.unwrap()(&nll_grads, &network.weights);
-        // println!("Weight Grads: {:?}", weight_grads);
-        // println!("Input Grads: {:?}", input_grads);
-
         let mut network: HeadNetwork<2, 2, 2> = HeadNetwork {
             weights: [[0.1, 0.2], [0.3, 0.4]],
             backwards: None,
@@ -184,11 +169,26 @@ mod tests {
             Box::new([Tensor1D::new([0.1, 0.3]), Tensor1D::new([0.2, 0.4])]);
         let indices = [0, 1];
         let outputs = network.forward_batch(input);
-        println!("Outputs: {:?}", outputs);
+        assert_eq!(
+            *outputs,
+            [[0.07, 0.15], [0.10000000000000002, 0.22000000000000003]]
+        );
         let (loss, nll_grads) = HeadNetwork::<2, 2, 2>::nll(outputs, &indices);
-        println!("Loss: {:?}", loss);
+        assert_eq!(*loss, [0.7082596763414484, 0.658759555548697]);
         let (weight_grads, input_grads) = network.backwards.unwrap()(&nll_grads, &network.weights);
-        println!("Weight Grads: {:?}", weight_grads);
-        println!("Input Grads: {:?}", input_grads);
+        assert_eq!(
+            *weight_grads,
+            [
+                [0.04700109947251052, -0.047001099472510514],
+                [0.04575148471166002, -0.045751484711660004]
+            ]
+        );
+        assert_eq!(
+            *input_grads,
+            [
+                [0.05074994375506206, -0.048250714233361025],
+                [0.05074994375506209, -0.048250714233361025]
+            ]
+        );
     }
 }

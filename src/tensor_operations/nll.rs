@@ -58,7 +58,7 @@ impl<const O: usize, const N: usize> Tensor1DNll<O, N> for Tensor1D<N, WithTape>
                 new_id,
                 Box::new(move |g| {
                     let mut tg = g.remove(new_id);
-                    tg.data = element_wise_mul::<N>(&tg.data, &softmax_value);
+                    tg.data = *element_wise_mul::<N>(&tg.data, &softmax_value);
                     g.insert(self_id, tg);
                 }),
             ));

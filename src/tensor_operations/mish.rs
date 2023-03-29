@@ -25,7 +25,7 @@ impl<const N: usize> Tensor1DMish<N, WithTape> for Tensor1D<N, WithTape> {
             new_id,
             Box::new(move |g| {
                 let mut tg = g.remove(new_id);
-                tg.data = element_wise_mul::<N>(&tg.data, &t_data);
+                tg.data = *element_wise_mul::<N>(&tg.data, &t_data);
                 g.insert(self_id, tg);
             }),
         ));
