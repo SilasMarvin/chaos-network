@@ -5,12 +5,10 @@ use rand::Rng;
 use serde::Serialize;
 
 use std::boxed::Box;
-use std::fs::DirBuilder;
 use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::gradients::Gradients;
 use crate::gradients::Tape;
@@ -74,8 +72,10 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                         self.inputs_count
                     };
                     self.insert_node(NodeKind::Normal, node_index);
-                    self.add_random_edge(node_index);
-                    self.add_random_edge_to(node_index);
+                    for _ii in 0..10 {
+                        self.add_random_edge_to(node_index);
+                        self.add_random_edge(node_index);
+                    }
                 }
             }
             NodeKind::Input => {
@@ -275,12 +275,8 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         output
     }
 
-    pub fn forward_batch_no_grad(&mut self, input: &[Tensor1D<N>; I]) -> Box<[Tensor1D<N>; O]> {
-        let mut output: [Tensor1D<N>; O] = (0..O)
-            .map(|_i| Tensor1D::new([0.; N]))
-            .collect::<Vec<Tensor1D<N>>>()
-            .try_into()
-            .unwrap();
+    pub fn forward_batch_no_grad(&mut self, input: &[Tensor1D<N>; I]) -> Box<[[f64; O]; N]> {
+        let mut output = [[0.; O]; N];
         let mut running_values: Vec<Option<Tensor1D<N, WithoutTape>>> = Vec::new();
         running_values.resize(self.nodes.len(), None);
         let nodes_len = self.nodes.len();
@@ -324,12 +320,72 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                         .unwrap_or(Tensor1D::new([0.; N]));
                     let mut val = node.weights[0].add(&mut val, &mut self.tape);
                     let val = val.mish(&mut self.tape);
-                    output[nodes_len - i - 1] = val;
+                    // output[nodes_len - i - 1] = val;
+                    let index = nodes_len - i - 1;
+                    for i in 0..N {
+                        output[i][index] = val.data[i];
+                    }
                 }
             }
         }
         Box::new(output)
     }
+
+    // pub fn forward_batch_no_grad(&mut self, input: &[Tensor1D<N>; I]) -> Box<[Tensor1D<N>; O]> {
+    //     let mut output: [Tensor1D<N>; O] = (0..O)
+    //         .map(|_i| Tensor1D::new([0.; N]))
+    //         .collect::<Vec<Tensor1D<N>>>()
+    //         .try_into()
+    //         .unwrap();
+    //     let mut running_values: Vec<Option<Tensor1D<N, WithoutTape>>> = Vec::new();
+    //     running_values.resize(self.nodes.len(), None);
+    //     let nodes_len = self.nodes.len();
+    //     for (i, node) in self.nodes.iter_mut().enumerate() {
+    //         match node.kind {
+    //             NodeKind::Input => {
+    //                 if node.edges.is_empty() {
+    //                     continue;
+    //                 }
+    //                 for (ii, edge) in node.edges.iter().enumerate() {
+    //                     let mut x =
+    //                         node.weights[ii].mul_explicit_no_grad(&input[i], &mut self.tape);
+    //                     let running_value = &mut running_values[*edge];
+    //                     running_values[*edge] = match running_value {
+    //                         Some(rv) => Some(x.add(rv, &mut self.tape).to_without_tape()),
+    //                         None => Some(x.to_without_tape()),
+    //                     }
+    //                 }
+    //             }
+    //             NodeKind::Normal => {
+    //                 let running_value = &mut running_values[i];
+    //                 let mut go_in = match running_value.as_mut() {
+    //                     Some(mut rv) => node.weights[0].add(&mut rv, &mut self.tape),
+    //                     None => panic!(
+    //                         "We should not be at a normal node that does not have a running value"
+    //                     ),
+    //                 };
+    //                 let go_in = go_in.mish(&mut self.tape);
+    //                 for (ii, edge) in node.edges.iter().enumerate() {
+    //                     let mut x =
+    //                         node.weights[ii + 1].mul_explicit_no_grad(&go_in, &mut self.tape);
+    //                     let running_value = &mut running_values[*edge];
+    //                     running_values[*edge] = match running_value {
+    //                         Some(rv) => Some(x.add(rv, &mut self.tape).to_without_tape()),
+    //                         None => Some(x.to_without_tape()),
+    //                     }
+    //                 }
+    //             }
+    //             NodeKind::Leaf => {
+    //                 let mut val = std::mem::replace(&mut running_values[i], None)
+    //                     .unwrap_or(Tensor1D::new([0.; N]));
+    //                 let mut val = node.weights[0].add(&mut val, &mut self.tape);
+    //                 let val = val.mish(&mut self.tape);
+    //                 output[nodes_len - i - 1] = val;
+    //             }
+    //         }
+    //     }
+    //     Box::new(output)
+    // }
 
     pub fn execute_and_apply_gradients(&mut self) {
         let mut grads = self.tape.execute();
@@ -338,7 +394,7 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         }
     }
 
-    pub fn write_to_new_dir(&self) -> std::io::Result<()> {
+    pub fn write_to_dir(&self, path: &str) -> std::io::Result<()> {
         let mut write_out: Vec<(NodeKind, Vec<usize>, Vec<f64>)> = Vec::new();
         for n in &self.nodes {
             write_out.push((
@@ -348,18 +404,14 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
             ));
         }
         let write_out = serde_json::to_string(&write_out)?;
-        let path: String = format!(
-            "networks/{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-        );
-        DirBuilder::new().recursive(true).create(&path).unwrap();
-        let path: String = format!("{}/{}.json", path, "1");
+        let path: String = format!("{}/chaos-network.json", path);
         let mut file = File::create(path)?;
         write!(file, "{}", write_out)?;
         Ok(())
+    }
+
+    pub fn get_normal_node_count(&self) -> usize {
+        self.nodes.len() - self.inputs_count - self.leaves_count
     }
 }
 
@@ -454,26 +506,6 @@ impl<const N: usize> Node<N> {
                 w.data -= self.optimizer.update(averaged_gradients);
             }
         }
-    }
-
-    fn to_string(&self) -> String {
-        let mut string = String::new();
-        let k = match &self.kind {
-            NodeKind::Input => 'I',
-            NodeKind::Normal => 'N',
-            NodeKind::Leaf => 'L',
-        };
-        string.push(k);
-        let mut weights_skip = 0;
-        if self.kind == NodeKind::Normal {
-            string.push_str(&format!("{}|", self.weights[0].data));
-            weights_skip = 1;
-        }
-        self.edges
-            .iter()
-            .zip(self.weights.iter().skip(weights_skip))
-            .for_each(|(e, w)| string.push_str(&format!("{}|{}", e, w.data)));
-        string
     }
 }
 

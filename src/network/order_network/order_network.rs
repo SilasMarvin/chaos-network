@@ -1,14 +1,53 @@
-use crate::tensors::{Tensor1D, WithTape, WithoutTape};
+pub trait OrderNetworkTrait<const I: usize, const O: usize, const N: usize>:
+    OrderNetworkTraitClone<I, O, N> + Send + Sync
+{
+    fn forward_batch(&mut self, input: Box<[[f64; I]; N]>) -> Box<[[f64; O]; N]>;
+    fn forward_batch_no_grad(&self, input: Box<[[f64; I]; N]>) -> Box<[[f64; O]; N]>;
+    fn backwards(&mut self, grads: &[[f64; O]; N]) -> Vec<Vec<f64>>;
+}
+
+pub trait OrderNetworkTraitClone<const I: usize, const O: usize, const N: usize> {
+    fn clone_box(&self) -> Box<dyn OrderNetworkTrait<I, O, N>>;
+}
+
+impl<
+        const I: usize,
+        const O: usize,
+        const N: usize,
+        T: 'static + OrderNetworkTrait<I, O, N> + Clone + Send,
+    > OrderNetworkTraitClone<I, O, N> for T
+{
+    fn clone_box(&self) -> Box<dyn OrderNetworkTrait<I, O, N>> {
+        Box::new(self.clone())
+    }
+}
+
+impl<const I: usize, const O: usize, const N: usize> Clone for Box<dyn OrderNetworkTrait<I, O, N>> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
 
 pub struct OrderNetwork<const D: usize, const I: usize, const O: usize, const N: usize> {
     pub weights: Vec<f64>,
-    pub backwards: Option<Vec<Box<dyn FnOnce(&Vec<f64>, &[f64; O]) -> Vec<f64>>>>,
+    pub backwards: Option<Vec<Box<dyn FnOnce(&Vec<f64>, &[f64; O]) -> Vec<f64> + Send + Sync>>>,
+}
+
+impl<const D: usize, const I: usize, const O: usize, const N: usize> Clone
+    for OrderNetwork<D, I, O, N>
+{
+    fn clone(&self) -> Self {
+        Self {
+            weights: self.weights.clone(),
+            backwards: None,
+        }
+    }
 }
 
 #[macro_export]
 macro_rules! build_order_network {
     ($f:literal, $i:literal, $o:literal, $n:literal) => {
-        use crate::network::OrderNetwork;
+        use crate::network::{OrderNetwork, OrderNetworkTrait};
         use chaos_network_derive::{build_backwards, build_forward, build_weights};
 
         impl Default for OrderNetwork<$f, $i, $o, $n> {
@@ -20,11 +59,8 @@ macro_rules! build_order_network {
             }
         }
 
-        impl OrderNetwork<$f, $i, $o, $n> {
-            pub fn forward_batch_no_grad(
-                &self,
-                input: Box<[[f64; $i]; $n]>,
-            ) -> Box<[[f64; $o]; $n]> {
+        impl OrderNetworkTrait<$i, $o, $n> for OrderNetwork<$f, $i, $o, $n> {
+            fn forward_batch_no_grad(&self, input: Box<[[f64; $i]; $n]>) -> Box<[[f64; $o]; $n]> {
                 let output = input.map(|data| {
                     let mut ret = [0.; $o];
                     let weights = &self.weights;
@@ -34,10 +70,10 @@ macro_rules! build_order_network {
                 Box::new(output)
             }
 
-            pub fn forward_batch(&mut self, input: Box<[[f64; $i]; $n]>) -> Box<[[f64; $o]; $n]> {
+            fn forward_batch(&mut self, input: Box<[[f64; $i]; $n]>) -> Box<[[f64; $o]; $n]> {
                 let mut output = [[0.; $o]; $n];
                 let mut partial_weight_funcs: Vec<
-                    Box<dyn FnOnce(&Vec<f64>, &[f64; $o]) -> Vec<f64>>,
+                    Box<dyn FnOnce(&Vec<f64>, &[f64; $o]) -> Vec<f64> + Send + Sync>,
                 > = Vec::new();
                 input.into_iter().enumerate().for_each(|(i, data)| {
                     let mut ret = [0.; $o];
@@ -56,7 +92,7 @@ macro_rules! build_order_network {
                 Box::new(output)
             }
 
-            pub fn backwards(&mut self, grads: &[[f64; $o]; $n]) -> Vec<Vec<f64>> {
+            fn backwards(&mut self, grads: &[[f64; $o]; $n]) -> Vec<Vec<f64>> {
                 match self.backwards.take() {
                     Some(vec) => {
                         let weights = &self.weights;
@@ -74,7 +110,6 @@ macro_rules! build_order_network {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
     use std::fs::File;
     use std::io::Write;

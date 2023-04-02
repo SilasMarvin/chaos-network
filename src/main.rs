@@ -12,8 +12,8 @@ const INPUTS: usize = 3072;
 const OUTPUTS: usize = 10;
 const BATCH_SIZE: usize = 32;
 const MAX_TRAINING_STEPS: usize = 1000000;
-const STEPS_PER_TRAINING_STEPS: usize = 150;
-const VALIDATION_STEPS: usize = 75;
+const STEPS_PER_TRAINING_STEPS: usize = 400;
+const VALIDATION_STEPS: usize = 150;
 
 // Order Network build constants
 const ON: usize = 1680044561;
@@ -21,12 +21,13 @@ const OI: usize = INPUTS;
 const OO: usize = 500;
 
 // Chaos network build constants
-const CI: usize = OI;
+const CI: usize = INPUTS;
 const CO: usize = 500;
 
 fn main() {
-    // build_order_network!(0, 3072, 500, 32);
-    // let mut current_order_network: OrderNetwork<0, 3072, 500, BATCH_SIZE> = OrderNetwork::default();
+    build_order_network!(1680065966, 3072, 500, 32);
+    let mut order_network: OrderNetwork<1680065966, 3072, 500, BATCH_SIZE> =
+        OrderNetwork::default();
 
     // Load data
     let CifarResult(train_data, train_labels, test_data, test_labels) = Cifar10::default()
@@ -78,10 +79,11 @@ fn main() {
         train_data,
         test_data,
         VALIDATION_STEPS,
+        Some(Box::new(order_network)),
     );
 
     // Train
-    network_handler.train();
+    network_handler.train_chaos_head();
 
     //
     //

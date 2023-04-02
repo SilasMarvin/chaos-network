@@ -27,7 +27,7 @@ pub fn build_weights(input_token_stream: TokenStream) -> TokenStream {
             );
         }
     };
-    let network_json = match read_to_string(format!("networks/{}/1.json", file_dir)) {
+    let network_json = match read_to_string(format!("networks/{}/chaos-network.json", file_dir)) {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
@@ -84,7 +84,7 @@ pub fn build_forward(input: TokenStream) -> TokenStream {
         ret_ident,
     } = parse_macro_input!(input as BuildForwardArgs);
 
-    let network_json = match read_to_string(format!("networks/{}/1.json", file_dir)) {
+    let network_json = match read_to_string(format!("networks/{}/chaos-network.json", file_dir)) {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
@@ -237,7 +237,7 @@ pub fn build_backwards(input_token_stream: TokenStream) -> TokenStream {
         weight_grads_ident,
     } = parse_macro_input!(input_token_stream as BuildBackwardsArgs);
 
-    let network_json = match read_to_string(format!("networks/{}/1.json", file_dir)) {
+    let network_json = match read_to_string(format!("networks/{}/chaos-network.json", file_dir)) {
         Ok(val) => val,
         Err(_e) => {
             return TokenStream::from(
