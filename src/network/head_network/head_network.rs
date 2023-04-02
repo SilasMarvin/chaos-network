@@ -148,7 +148,12 @@ impl<const I: usize, const O: usize, const N: usize> HeadNetwork<I, O, N> {
                         tracker += 1;
                         x
                     });
-                    input_grads[i][ii] = element_wise_mul(&weights[ii], &grads[ii]).iter().sum();
+                    // I thought dividing by N only made sense at the end, but it seems pytorch
+                    // wants to do it here as well
+                    input_grads[i][ii] = element_wise_mul(&weights[ii], &grads[i])
+                        .iter()
+                        .sum::<f64>()
+                        / (N as f64);
                 }
             }
             (Box::new(weight_grads), Box::new(input_grads))
@@ -367,8 +372,7 @@ mod tests {
                 [0.48250714233361025, -0.48250714233361025]
             ]
         );
-        let (weight_grads, input_grads) =
-            network.test_backwards.unwrap()(&nll_grads, &network.weights);
+        let (weight_grads, input_grads) = network.backwards_test(&nll_grads);
         assert_eq!(
             *weight_grads,
             [
@@ -379,11 +383,29 @@ mod tests {
         assert_eq!(
             *input_grads,
             [
-                [0.05074994375506206, -0.048250714233361025],
-                [0.05074994375506206, -0.048250714233361025]
+                [0.02537497187753103, 0.025374971877531044],
+                [-0.024125357116680513, -0.024125357116680513]
             ]
         );
     }
+
+    // #[test]
+    // fn test_head_network_forward_batch_train() {
+    //     let mut network: HeadNetwork<2, 2, 2> = HeadNetwork {
+    //         weights: [[0.1, 0.2], [0.3, 0.4]],
+    //         backwards: None,
+    //         test_backwards: None,
+    //     };
+    //     let input = Box::new([[0.1, 0.2], [0.3, 0.4]]);
+    //     for i in 0..100 {
+    //         let outputs = network.forward_batch(input.clone());
+    //         let indices = [1, 1];
+    //         let (loss, nll_grads) = HeadNetwork::<2, 2, 2>::nll_test(outputs, &indices);
+    //         println!("Loss: {:?}", loss);
+    //         let (weight_grads, input_grads) = network.backwards_test(&nll_grads);
+    //         network.apply_gradients(&weight_grads);
+    //     }
+    // }
 
     // #[test]
     // fn test_head_network_speed() {

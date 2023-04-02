@@ -1,4 +1,3 @@
-use crate::build_order_network;
 use crate::network::ChaosNetwork;
 use crate::network::NodeKind;
 use crate::tensors::Tensor1D;
@@ -124,6 +123,37 @@ impl<
     }
 }
 
+// fn train_chaos_head_next_batch<
+//     const CI: usize,
+//     const CO: usize,
+//     const HO: usize,
+//     const N: usize,
+// >(
+//     chaos_network: &mut ChaosNetwork<CI, CO, N>,
+//     head_network: &mut HeadNetwork<CO, HO, N>,
+//     train_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; CI]>),
+// ) {
+//     let (labels, inputs) = train_data;
+//     let outputs = chaos_network.forward_batch(inputs);
+//     let output_ids: Vec<usize> = outputs.iter().map(|t| t.id).collect();
+//     let outputs = head_network.forward_batch_from_chaos(outputs);
+//     let (_losses, nll_grads) = HeadNetwork::<CO, HO, N>::nll(outputs, labels);
+//     let (head_network_grads, chaos_network_outputs_grads) = head_network.backwards(&nll_grads);
+//     head_network.apply_gradients(&head_network_grads);
+//     output_ids
+//         .into_iter()
+//         .zip(chaos_network_outputs_grads.into_iter())
+//         .for_each(|(id, grads)| {
+//             chaos_network.tape.add_operation((
+//                 usize::MAX,
+//                 Box::new(move |g| {
+//                     g.insert(id, Tensor1D::new(grads));
+//                 }),
+//             ));
+//         });
+//     chaos_network.execute_and_apply_gradients();
+// }
+
 fn train_chaos_head_next_batch<
     const CI: usize,
     const CO: usize,
@@ -135,23 +165,24 @@ fn train_chaos_head_next_batch<
     train_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; CI]>),
 ) {
     let (labels, inputs) = train_data;
-    let outputs = chaos_network.forward_batch(inputs);
-    let output_ids: Vec<usize> = outputs.iter().map(|t| t.id).collect();
-    let outputs = head_network.forward_batch_from_chaos(outputs);
-    let (_losses, nll_grads) = HeadNetwork::<CO, HO, N>::nll(outputs, labels);
-    let (head_network_grads, chaos_network_outputs_grads) = head_network.backwards(&nll_grads);
+    let (outputs, outputs_ids) = chaos_network.forward_batch(inputs);
+    let outputs = head_network.forward_batch(outputs);
+    let (_losses, nll_grads) = HeadNetwork::<CO, HO, N>::nll_test(outputs, labels);
+    let (head_network_grads, chaos_network_outputs_grads) = head_network.backwards_test(&nll_grads);
     head_network.apply_gradients(&head_network_grads);
-    output_ids
-        .into_iter()
-        .zip(chaos_network_outputs_grads.into_iter())
-        .for_each(|(id, grads)| {
-            chaos_network.tape.add_operation((
-                usize::MAX,
-                Box::new(move |g| {
-                    g.insert(id, Tensor1D::new(grads));
-                }),
-            ));
-        });
+    outputs_ids.into_iter().enumerate().for_each(|(i, id)| {
+        let grads: [f64; N] = (0..N)
+            .map(|ii| chaos_network_outputs_grads[ii][i])
+            .collect::<Vec<f64>>()
+            .try_into()
+            .unwrap();
+        chaos_network.tape.add_operation((
+            usize::MAX,
+            Box::new(move |g| {
+                g.insert(id, Tensor1D::new(grads));
+            }),
+        ));
+    });
     chaos_network.execute_and_apply_gradients();
 }
 
@@ -324,15 +355,14 @@ impl<
                     .map(|_i| {
                         let mut chaos_network = if training_step != 0 {
                             let mut network = current_chaos_network.clone();
-                            network.add_nodes(NodeKind::Normal, nodes_to_add);
-                            network.add_random_edges_for_random_nodes(edges_to_add);
+                            // network.add_nodes(NodeKind::Normal, nodes_to_add);
+                            // network.add_random_edges_for_random_nodes(edges_to_add);
                             network
                         } else {
                             // ChaosNetwork::new(OI, CO)
                             current_chaos_network.clone()
                         };
                         let mut head_network = current_head_network.clone();
-                        println!("WE ARE HERE");
                         batch_train_data.iter().for_each(|batch| {
                             train_chaos_head_next_batch(
                                 &mut chaos_network,
@@ -340,7 +370,6 @@ impl<
                                 batch,
                             )
                         });
-                        println!("No way we got here");
                         let average_validation_accuracy: f64 = batch_test_data
                             .iter()
                             .map(|step| {
