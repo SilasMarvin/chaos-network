@@ -48,7 +48,7 @@ impl<const D: usize, const I: usize, const O: usize, const N: usize> Clone
 #[macro_export]
 macro_rules! build_order_network {
     ($f:literal, $i:literal, $o:literal, $n:literal) => {
-        use crate::network::{OrderNetwork, OrderNetworkTrait};
+        use crate::network::order_network::{OrderNetwork, OrderNetworkTrait};
         use chaos_network_derive::{build_backwards, build_forward, build_weights};
 
         impl Default for OrderNetwork<$f, $i, $o, $n> {

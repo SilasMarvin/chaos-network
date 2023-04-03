@@ -1,5 +1,5 @@
-use crate::gradients::Tape;
-use crate::tensors::{element_wise_mul, Tensor1D, WithTape};
+use crate::network::chaos_network::gradients::Tape;
+use crate::network::chaos_network::tensors::{element_wise_mul, Tensor1D, WithTape};
 
 pub trait Tensor1DNll<const O: usize, const N: usize> {
     fn nll(
@@ -70,7 +70,6 @@ impl<const O: usize, const N: usize> Tensor1DNll<O, N> for Tensor1D<N, WithTape>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gradients::Tape;
 
     #[test]
     // Might need to double check this one

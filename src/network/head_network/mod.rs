@@ -1,3 +1,3 @@
-mod head_network;
+pub mod head_network;
 
-pub use self::head_network::HeadNetwork;
+pub use head_network::*;

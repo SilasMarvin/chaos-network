@@ -1,5 +1,7 @@
-use crate::gradients::Tape;
-use crate::tensors::{element_wise_addition, Tensor0D, Tensor1D, WithTape, WithoutTape};
+use crate::network::chaos_network::gradients::Tape;
+use crate::network::chaos_network::tensors::{
+    element_wise_addition, Tensor0D, Tensor1D, WithTape, WithoutTape,
+};
 
 pub trait Tensor1DAdd<const N: usize, TensorTape1, TensorTape2> {
     fn add(

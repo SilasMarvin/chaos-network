@@ -1,4 +1,4 @@
-use crate::network::ChaosNetwork;
+use crate::network::chaos_network::chaos_network::ChaosNetwork;
 
 impl<const I: usize, const O: usize, const N: usize> Clone for ChaosNetwork<I, O, N> {
     fn clone(&self) -> Self {

@@ -1,12 +1,7 @@
-use crate::network::ChaosNetwork;
 use cifar_ten::*;
 
-mod gradients;
 mod network;
-mod tensor_operations;
-mod tensors;
-
-use crate::network::{RepeatingNetworkData, StandardClassificationNetworkHandler};
+use crate::network::network_handler::{RepeatingNetworkData, StandardClassificationNetworkHandler};
 
 // General constants
 const INPUTS: usize = 3072;
@@ -25,24 +20,24 @@ const OO: usize = 500;
 const CI: usize = INPUTS;
 const CO: usize = 500;
 
-use crate::tensors::Tensor1D;
-fn transform_train_data_for_chaos_network<const I: usize, const N: usize>(
-    data: Box<[[f64; I]; N]>,
-) -> Box<[Tensor1D<N>; I]> {
-    let ret: [Tensor1D<N>; I] = (0..I)
-        .map(|i| {
-            let t_data: [f64; N] = (0..N)
-                .map(|ii| data[ii][i])
-                .collect::<Vec<f64>>()
-                .try_into()
-                .unwrap();
-            Tensor1D::new(t_data)
-        })
-        .collect::<Vec<Tensor1D<N>>>()
-        .try_into()
-        .unwrap();
-    Box::new(ret)
-}
+// use crate::tensors::Tensor1D;
+// fn transform_train_data_for_chaos_network<const I: usize, const N: usize>(
+//     data: Box<[[f64; I]; N]>,
+// ) -> Box<[Tensor1D<N>; I]> {
+//     let ret: [Tensor1D<N>; I] = (0..I)
+//         .map(|i| {
+//             let t_data: [f64; N] = (0..N)
+//                 .map(|ii| data[ii][i])
+//                 .collect::<Vec<f64>>()
+//                 .try_into()
+//                 .unwrap();
+//             Tensor1D::new(t_data)
+//         })
+//         .collect::<Vec<Tensor1D<N>>>()
+//         .try_into()
+//         .unwrap();
+//     Box::new(ret)
+// }
 
 fn main() {
     // let inputs = Box::new([[0.1; 10]; 1]);

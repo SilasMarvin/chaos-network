@@ -1,5 +1,5 @@
-use crate::gradients::Tape;
-use crate::tensors::{element_wise_mul, Tensor1D, WithTape, WithoutTape};
+use crate::network::chaos_network::gradients::Tape;
+use crate::network::chaos_network::tensors::{element_wise_mul, Tensor1D, WithTape, WithoutTape};
 
 fn do_mish_backward(x: f64) -> f64 {
     let w = (4. * (x + 1.)) + (4. * (2. * x).exp()) + (3. * x).exp() + (x.exp() * ((4. * x) + 6.));

@@ -1,4 +1,4 @@
-use crate::tensors::{element_wise_mul, Tensor1D, WithTape, WithoutTape};
+use crate::network::chaos_network::tensors::helpers::element_wise_mul;
 
 use matrixmultiply::dgemm;
 use rand::Rng;

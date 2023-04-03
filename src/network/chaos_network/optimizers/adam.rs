@@ -1,4 +1,4 @@
-use crate::network::Optimizer;
+use crate::network::chaos_network::optimizers::Optimizer;
 
 #[derive(Clone)]
 pub struct AdamOptimizer {

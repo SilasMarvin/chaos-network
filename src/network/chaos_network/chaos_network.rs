@@ -10,13 +10,12 @@ use std::io::Write;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use crate::gradients::Gradients;
-use crate::gradients::Tape;
-use crate::network::{AdamOptimizer, Optimizer};
-use crate::tensor_operations::{
+use crate::network::chaos_network::gradients::{Gradients, Tape};
+use crate::network::chaos_network::optimizers::{AdamOptimizer, Optimizer};
+use crate::network::chaos_network::tensor_operations::{
     Tensor0DAdd, Tensor0DMul, Tensor1DAdd, Tensor1DMish, Tensor1DSplitOnAdd,
 };
-use crate::tensors::{Tensor0D, Tensor1D, WithTape, WithoutTape};
+use crate::network::chaos_network::tensors::{Tensor0D, Tensor1D, WithTape, WithoutTape};
 
 pub static NODE_COUNT: AtomicUsize = AtomicUsize::new(0);
 

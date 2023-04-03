@@ -1,4 +1,4 @@
-use crate::network::{ChaosNetwork, Node};
+use crate::network::chaos_network::chaos_network::{ChaosNetwork, Node};
 use std::fmt;
 
 impl<const N: usize> fmt::Debug for Node<N> {

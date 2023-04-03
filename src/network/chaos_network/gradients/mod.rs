@@ -1,4 +1,4 @@
-use crate::tensors::Tensor1D;
+use crate::network::chaos_network::tensors::Tensor1D;
 
 #[derive(Default)]
 pub struct Tape<const N: usize> {

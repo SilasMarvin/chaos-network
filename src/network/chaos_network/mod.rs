@@ -1,7 +1,8 @@
-mod chaos_network;
-mod clone;
-mod fmt;
-mod optimizers;
+pub mod chaos_network;
+pub mod clone;
+pub mod fmt;
 
-pub use self::chaos_network::{ChaosNetwork, Node, NodeKind};
-pub use self::optimizers::*;
+pub mod gradients;
+pub mod optimizers;
+pub mod tensor_operations;
+pub mod tensors;

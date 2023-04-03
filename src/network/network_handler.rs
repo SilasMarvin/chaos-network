@@ -1,6 +1,3 @@
-use crate::network::ChaosNetwork;
-use crate::network::NodeKind;
-use crate::tensors::Tensor1D;
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use rayon::prelude::*;
@@ -8,8 +5,11 @@ use std::fs::DirBuilder;
 use std::time::{SystemTime, UNIX_EPOCH};
 use termion::input::TermRead;
 
-use crate::network::HeadNetwork;
-use crate::network::{OrderNetwork, OrderNetworkTrait};
+use crate::network::chaos_network::chaos_network::ChaosNetwork;
+use crate::network::chaos_network::chaos_network::NodeKind;
+use crate::network::chaos_network::tensors::Tensor1D;
+use crate::network::head_network::HeadNetwork;
+use crate::network::order_network::{OrderNetwork, OrderNetworkTrait};
 
 const MORPHS_PER_ITERATION: usize = 1;
 
