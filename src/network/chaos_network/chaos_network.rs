@@ -53,10 +53,10 @@ pub struct Node<const N: usize> {
 }
 
 impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
-    pub fn new(inputs: usize, outputs: usize) -> Self {
+    pub fn new() -> Self {
         let mut network: ChaosNetwork<I, O, N> = ChaosNetwork::default();
-        network.add_nodes(NodeKind::Input, inputs);
-        network.add_nodes(NodeKind::Leaf, outputs);
+        network.add_nodes(NodeKind::Input, I);
+        network.add_nodes(NodeKind::Leaf, O);
         network
     }
 
@@ -78,19 +78,6 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                 }
             }
             NodeKind::Input => {
-                // if self.leaves_count == 0 {
-                //     panic!("This should be called after leaves are added for now")
-                // }
-                // let mut rng = rand::thread_rng();
-                // for _i in 0..count {
-                //     self.insert_node(NodeKind::Input, 0);
-                //     self.inputs_count += 1;
-                //     for ii in 0..self.leaves_count {
-                //         if rng.gen::<f64>() < self.input_connectivity_chance {
-                //             self.add_edge(0, self.nodes.len() - 1 - ii);
-                //         }
-                //     }
-                // }
                 if self.nodes.len() > 0 {
                     panic!("Adding the input nodes should be the first step")
                 }
@@ -172,7 +159,8 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         let mut rng = rand::thread_rng();
         let mut lock_break = 0;
         let node_index_from = loop {
-            let index = rng.gen_range(0..node_index_to);
+            let index =
+                rng.gen_range(0..node_index_to.min(self.nodes.len() - self.leaves_count - 1));
             let edges = &self.nodes[index].edges;
             if !edges.contains(&node_index_to) {
                 break index;
@@ -213,67 +201,6 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         self.nodes.iter().fold(0, |acc, n| acc + n.edges.len())
     }
 
-    // pub fn forward_batch(&mut self, input: &[Tensor1D<N>; I]) -> Box<[Tensor1D<N, WithTape>; O]> {
-    //     let mut output: Box<[Tensor1D<N, WithTape>; O]> = Box::new(
-    //         (0..O)
-    //             .map(|_i| Tensor1D::new([0.; N]))
-    //             .collect::<Vec<Tensor1D<N, WithTape>>>()
-    //             .try_into()
-    //             .unwrap(),
-    //     );
-    //     let mut running_values: Vec<Option<Tensor1D<N, WithTape>>> = Vec::new();
-    //     running_values.resize(self.nodes.len(), None);
-    //     let nodes_len = self.nodes.len();
-    //     for (i, node) in self.nodes.iter_mut().enumerate() {
-    //         match node.kind {
-    //             NodeKind::Input => {
-    //                 if node.edges.is_empty() {
-    //                     continue;
-    //                 }
-    //                 for (ii, edge) in node.edges.iter().enumerate() {
-    //                     let mut x =
-    //                         node.weights[ii].mul_left_by_reference(&input[i], &mut self.tape);
-    //                     let running_value = &mut running_values[*edge];
-    //                     running_values[*edge] = match running_value {
-    //                         Some(rv) => Some(x.add(rv, &mut self.tape)),
-    //                         None => Some(x),
-    //                     }
-    //                 }
-    //             }
-    //             NodeKind::Normal => {
-    //                 let running_value = &mut running_values[i];
-    //                 let mut go_in = match running_value.as_mut() {
-    //                     Some(mut rv) => node.weights[0].add(&mut rv, &mut self.tape),
-    //                     None => {
-    //                         panic!("We should not be at a normal node that does not have a running value");
-    //                     }
-    //                 };
-    //                 let go_in = go_in.mish(&mut self.tape);
-    //                 let mut go_in = match node.edges.len() > 1 {
-    //                     true => go_in.split_on_add(node.edges.len(), &mut self.tape),
-    //                     _ => vec![go_in],
-    //                 };
-    //                 for (ii, edge) in node.edges.iter().enumerate() {
-    //                     let mut x = node.weights[ii + 1].mul(&mut go_in[ii], &mut self.tape);
-    //                     let running_value = &mut running_values[*edge];
-    //                     running_values[*edge] = match running_value {
-    //                         Some(rv) => Some(x.add(rv, &mut self.tape)),
-    //                         None => Some(x),
-    //                     }
-    //                 }
-    //             }
-    //             NodeKind::Leaf => {
-    //                 let mut val = std::mem::replace(&mut running_values[i], None)
-    //                     .unwrap_or(Tensor1D::new([0.; N]));
-    //                 let mut val = node.weights[0].add(&mut val, &mut self.tape);
-    //                 let val = val.mish(&mut self.tape);
-    //                 output[nodes_len - i - 1] = val;
-    //             }
-    //         }
-    //     }
-    //     output
-    // }
-
     pub fn forward_batch(
         &mut self,
         input: &[Tensor1D<N>; I],
@@ -282,7 +209,7 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         let mut output_ids = [0; O];
         let mut running_values: Vec<Option<Tensor1D<N, WithTape>>> = Vec::new();
         running_values.resize(self.nodes.len(), None);
-        let nodes_len = self.nodes.len();
+        let mut output_index = 0;
         for (i, node) in self.nodes.iter_mut().enumerate() {
             match node.kind {
                 NodeKind::Input => {
@@ -326,11 +253,11 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                         .unwrap_or(Tensor1D::new([0.; N]));
                     let mut val = node.weights[0].add(&mut val, &mut self.tape);
                     let val = val.mish(&mut self.tape);
-                    let index = nodes_len - i - 1;
                     for i in 0..N {
-                        output[i][index] = val.data[i];
+                        output[i][output_index] = val.data[i];
                     }
-                    output_ids[index] = val.id;
+                    output_ids[output_index] = val.id;
+                    output_index += 1;
                 }
             }
         }
@@ -341,7 +268,7 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         let mut output = [[0.; O]; N];
         let mut running_values: Vec<Option<Tensor1D<N, WithoutTape>>> = Vec::new();
         running_values.resize(self.nodes.len(), None);
-        let nodes_len = self.nodes.len();
+        let mut output_index = 0;
         for (i, node) in self.nodes.iter_mut().enumerate() {
             match node.kind {
                 NodeKind::Input => {
@@ -382,71 +309,15 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                         .unwrap_or(Tensor1D::new([0.; N]));
                     let mut val = node.weights[0].add(&mut val, &mut self.tape);
                     let val = val.mish(&mut self.tape);
-                    let index = nodes_len - i - 1;
                     for i in 0..N {
-                        output[i][index] = val.data[i];
+                        output[i][output_index] = val.data[i];
                     }
+                    output_index += 1;
                 }
             }
         }
         Box::new(output)
     }
-
-    // pub fn forward_batch_no_grad(&mut self, input: &[Tensor1D<N>; I]) -> Box<[Tensor1D<N>; O]> {
-    //     let mut output: [Tensor1D<N>; O] = (0..O)
-    //         .map(|_i| Tensor1D::new([0.; N]))
-    //         .collect::<Vec<Tensor1D<N>>>()
-    //         .try_into()
-    //         .unwrap();
-    //     let mut running_values: Vec<Option<Tensor1D<N, WithoutTape>>> = Vec::new();
-    //     running_values.resize(self.nodes.len(), None);
-    //     let nodes_len = self.nodes.len();
-    //     for (i, node) in self.nodes.iter_mut().enumerate() {
-    //         match node.kind {
-    //             NodeKind::Input => {
-    //                 if node.edges.is_empty() {
-    //                     continue;
-    //                 }
-    //                 for (ii, edge) in node.edges.iter().enumerate() {
-    //                     let mut x =
-    //                         node.weights[ii].mul_explicit_no_grad(&input[i], &mut self.tape);
-    //                     let running_value = &mut running_values[*edge];
-    //                     running_values[*edge] = match running_value {
-    //                         Some(rv) => Some(x.add(rv, &mut self.tape).to_without_tape()),
-    //                         None => Some(x.to_without_tape()),
-    //                     }
-    //                 }
-    //             }
-    //             NodeKind::Normal => {
-    //                 let running_value = &mut running_values[i];
-    //                 let mut go_in = match running_value.as_mut() {
-    //                     Some(mut rv) => node.weights[0].add(&mut rv, &mut self.tape),
-    //                     None => panic!(
-    //                         "We should not be at a normal node that does not have a running value"
-    //                     ),
-    //                 };
-    //                 let go_in = go_in.mish(&mut self.tape);
-    //                 for (ii, edge) in node.edges.iter().enumerate() {
-    //                     let mut x =
-    //                         node.weights[ii + 1].mul_explicit_no_grad(&go_in, &mut self.tape);
-    //                     let running_value = &mut running_values[*edge];
-    //                     running_values[*edge] = match running_value {
-    //                         Some(rv) => Some(x.add(rv, &mut self.tape).to_without_tape()),
-    //                         None => Some(x.to_without_tape()),
-    //                     }
-    //                 }
-    //             }
-    //             NodeKind::Leaf => {
-    //                 let mut val = std::mem::replace(&mut running_values[i], None)
-    //                     .unwrap_or(Tensor1D::new([0.; N]));
-    //                 let mut val = node.weights[0].add(&mut val, &mut self.tape);
-    //                 let val = val.mish(&mut self.tape);
-    //                 output[nodes_len - i - 1] = val;
-    //             }
-    //         }
-    //     }
-    //     Box::new(output)
-    // }
 
     pub fn execute_and_apply_gradients(&mut self) {
         let mut grads = self.tape.execute();
@@ -725,7 +596,7 @@ mod tests {
 
     #[test]
     fn test_new_network() {
-        let network: ChaosNetwork<10, 10, 10> = ChaosNetwork::new(10, 10);
+        let network: ChaosNetwork<10, 10, 10> = ChaosNetwork::new();
         assert_eq!(network.inputs_count, 10);
         assert_eq!(network.leaves_count, 10);
     }

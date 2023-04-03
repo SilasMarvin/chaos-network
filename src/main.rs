@@ -1,3 +1,4 @@
+use crate::network::ChaosNetwork;
 use cifar_ten::*;
 
 mod gradients;
@@ -16,7 +17,7 @@ const STEPS_PER_TRAINING_STEPS: usize = 400;
 const VALIDATION_STEPS: usize = 150;
 
 // Order Network build constants
-const ON: usize = 1680044561;
+const ON: usize = 1680470380;
 const OI: usize = INPUTS;
 const OO: usize = 500;
 
@@ -24,10 +25,42 @@ const OO: usize = 500;
 const CI: usize = INPUTS;
 const CO: usize = 500;
 
+use crate::tensors::Tensor1D;
+fn transform_train_data_for_chaos_network<const I: usize, const N: usize>(
+    data: Box<[[f64; I]; N]>,
+) -> Box<[Tensor1D<N>; I]> {
+    let ret: [Tensor1D<N>; I] = (0..I)
+        .map(|i| {
+            let t_data: [f64; N] = (0..N)
+                .map(|ii| data[ii][i])
+                .collect::<Vec<f64>>()
+                .try_into()
+                .unwrap();
+            Tensor1D::new(t_data)
+        })
+        .collect::<Vec<Tensor1D<N>>>()
+        .try_into()
+        .unwrap();
+    Box::new(ret)
+}
+
 fn main() {
-    build_order_network!(1680065966, 3072, 500, 32);
-    let mut order_network: OrderNetwork<1680065966, 3072, 500, BATCH_SIZE> =
-        OrderNetwork::default();
+    // let inputs = Box::new([[0.1; 10]; 1]);
+
+    // let inputs = transform_train_data_for_chaos_network(inputs);
+    // let mut chaos_network: ChaosNetwork<10, 10, 1> = ChaosNetwork::new(10, 10);
+    // chaos_network.write_to_dir("networks/10").unwrap();
+    // let outputs = chaos_network.forward_batch(&inputs);
+
+    // build_order_network!(10, 10, 10, 1);
+    // let mut order_network: OrderNetwork<10, 10, 10, 1> = OrderNetwork::default();
+    // let outputs = order_network.forward_batch(inputs);
+    // println!("Weights: {:?}", order_network.weights);
+    //
+    // println!("Outputs: {:?}", outputs);
+
+    build_order_network!(1680549994, 3072, 500, 32);
+    let order_network: OrderNetwork<1680549994, 3072, 500, BATCH_SIZE> = OrderNetwork::default();
 
     // Load data
     let CifarResult(train_data, train_labels, test_data, test_labels) = Cifar10::default()
@@ -83,7 +116,8 @@ fn main() {
     );
 
     // Train
-    network_handler.train_chaos_head();
+    // network_handler.train_chaos_head();
+    network_handler.fine_tune();
 
     //
     //

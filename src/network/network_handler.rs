@@ -54,6 +54,7 @@ impl<const I: usize, const N: usize> RepeatingNetworkData<I, N> {
             .unwrap();
         let inputs: [[f64; I]; N] =
             indices.map(|index| self.data[index].map(|d| (d as f64) / 255.));
+        indices.map(|index| self.data[index].map(|d| (d as f64) / 255.));
         let labels: [usize; N] = indices.map(|index| self.labels[index] as usize);
         (Box::new(labels), Box::new(inputs))
     }
@@ -123,37 +124,6 @@ impl<
     }
 }
 
-// fn train_chaos_head_next_batch<
-//     const CI: usize,
-//     const CO: usize,
-//     const HO: usize,
-//     const N: usize,
-// >(
-//     chaos_network: &mut ChaosNetwork<CI, CO, N>,
-//     head_network: &mut HeadNetwork<CO, HO, N>,
-//     train_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; CI]>),
-// ) {
-//     let (labels, inputs) = train_data;
-//     let outputs = chaos_network.forward_batch(inputs);
-//     let output_ids: Vec<usize> = outputs.iter().map(|t| t.id).collect();
-//     let outputs = head_network.forward_batch_from_chaos(outputs);
-//     let (_losses, nll_grads) = HeadNetwork::<CO, HO, N>::nll(outputs, labels);
-//     let (head_network_grads, chaos_network_outputs_grads) = head_network.backwards(&nll_grads);
-//     head_network.apply_gradients(&head_network_grads);
-//     output_ids
-//         .into_iter()
-//         .zip(chaos_network_outputs_grads.into_iter())
-//         .for_each(|(id, grads)| {
-//             chaos_network.tape.add_operation((
-//                 usize::MAX,
-//                 Box::new(move |g| {
-//                     g.insert(id, Tensor1D::new(grads));
-//                 }),
-//             ));
-//         });
-//     chaos_network.execute_and_apply_gradients();
-// }
-
 fn train_chaos_head_next_batch<
     const CI: usize,
     const CO: usize,
@@ -167,8 +137,8 @@ fn train_chaos_head_next_batch<
     let (labels, inputs) = train_data;
     let (outputs, outputs_ids) = chaos_network.forward_batch(inputs);
     let outputs = head_network.forward_batch(outputs);
-    let (_losses, nll_grads) = HeadNetwork::<CO, HO, N>::nll_test(outputs, labels);
-    let (head_network_grads, chaos_network_outputs_grads) = head_network.backwards_test(&nll_grads);
+    let (_losses, nll_grads) = HeadNetwork::<CO, HO, N>::nll(outputs, labels);
+    let (head_network_grads, chaos_network_outputs_grads) = head_network.backwards(&nll_grads);
     head_network.apply_gradients(&head_network_grads);
     outputs_ids.into_iter().enumerate().for_each(|(i, id)| {
         let grads: [f64; N] = (0..N)
@@ -185,38 +155,6 @@ fn train_chaos_head_next_batch<
     });
     chaos_network.execute_and_apply_gradients();
 }
-
-// fn validate_chaos_head_next_batch<
-//     const CI: usize,
-//     const CO: usize,
-//     const HO: usize,
-//     const N: usize,
-// >(
-//     chaos_network: &mut ChaosNetwork<CI, CO, N>,
-//     head_network: &mut HeadNetwork<CO, HO, N>,
-//     test_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; CI]>),
-// ) -> f64 {
-//     let (labels, inputs) = test_data;
-//     let outputs = chaos_network.forward_batch_no_grad(inputs);
-//     let outputs = head_network.forward_batch_no_grad_from_chaos(outputs);
-//     let guesses: Vec<usize> = (0..N)
-//         .map(|i| {
-//             let mut max: (usize, f64) = (0, outputs[0][i]);
-//             for ii in 0..HO {
-//                 if outputs[ii][i] > max.1 {
-//                     max = (ii, outputs[ii][i]);
-//                 }
-//             }
-//             max.0
-//         })
-//         .collect();
-//     let correct = guesses
-//         .iter()
-//         .enumerate()
-//         .filter(|(i, g)| **g == labels[*i])
-//         .count();
-//     (correct as f64) / N as f64
-// }
 
 fn validate_chaos_head_next_batch<
     const CI: usize,
@@ -247,60 +185,54 @@ fn validate_chaos_head_next_batch<
     (correct as f64) / N as f64
 }
 
-// fn train_next_batch<const CI: usize, const CO: usize, const HO: usize, const N: usize>(
-//     order_network: &mut Option<Box<dyn OrderNetworkTrait<OI, OO, N>>>,
-//     chaos_network: &mut ChaosNetwork<CI, CO, N>,
-//     head_network: &mut HeadNetwork<CO, HO, N>,
-//     train_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; CI]>),
-// ) {
-//     let (labels, inputs) = train_data;
-//     let outputs = chaos_network.forward_batch(inputs);
-//     let output_ids: Vec<usize> = outputs.iter().map(|t| t.id).collect();
-//     let outputs = head_network.forward_batch(outputs);
-//     let (_losses, nll_grads) = HeadNetwork::<CO, HO, N>::nll(outputs, labels);
-//     let (head_network_grads, chaos_network_outputs_grads) = head_network.backwards(&nll_grads);
-//     head_network.apply_gradients(&head_network_grads);
-//     output_ids
-//         .into_iter()
-//         .zip(chaos_network_outputs_grads.into_iter())
-//         .for_each(|(id, grads)| {
-//             chaos_network.tape.add_operation((
-//                 usize::MAX,
-//                 Box::new(move |g| {
-//                     g.insert(id, Tensor1D::new(grads));
-//                 }),
-//             ));
-//         });
-//     chaos_network.execute_and_apply_gradients();
-// }
-//
-// fn validate_next_batch<const CI: usize, const CO: usize, const HO: usize, const N: usize>(
-//     order_network: &mut Option<Box<dyn OrderNetworkTrait<OI, OO, N>>>,
-//     chaos_network: &mut ChaosNetwork<CI, CO, N>,
-//     head_network: &mut HeadNetwork<CO, HO, N>,
-//     test_data: &(Box<[usize; N]>, Box<[Tensor1D<N>; CI]>),
-// ) -> f64 {
-//     let (labels, inputs) = test_data;
-//     let outputs = chaos_network.forward_batch_no_grad(inputs);
-//     let outputs = head_network.forward_batch_no_grad(outputs);
-//     let guesses: Vec<usize> = (0..N)
-//         .map(|i| {
-//             let mut max: (usize, f64) = (0, outputs[0][i]);
-//             for ii in 0..HO {
-//                 if outputs[ii][i] > max.1 {
-//                     max = (ii, outputs[ii][i]);
-//                 }
-//             }
-//             max.0
-//         })
-//         .collect();
-//     let correct = guesses
-//         .iter()
-//         .enumerate()
-//         .filter(|(i, g)| **g == labels[*i])
-//         .count();
-//     (correct as f64) / N as f64
-// }
+fn train_order_head_next_batch<
+    const OI: usize,
+    const OO: usize,
+    const HO: usize,
+    const N: usize,
+>(
+    order_network: &mut Box<dyn OrderNetworkTrait<OI, OO, N>>,
+    head_network: &mut HeadNetwork<OO, HO, N>,
+    train_data: (Box<[usize; N]>, Box<[[f64; OI]; N]>),
+) {
+    let (labels, inputs) = train_data;
+    let outputs = order_network.forward_batch(inputs);
+    let outputs = head_network.forward_batch(outputs);
+    let (_losses, nll_grads) = HeadNetwork::<OO, HO, N>::nll(outputs, &labels);
+    let (head_network_grads, order_network_outputs_grads) = head_network.backwards(&nll_grads);
+    head_network.apply_gradients(&head_network_grads);
+    let order_network_grads = order_network.backwards(&order_network_outputs_grads);
+    order_network.apply_gradients(order_network_grads);
+}
+
+fn validate_order_head_next_batch<
+    const OI: usize,
+    const OO: usize,
+    const HO: usize,
+    const N: usize,
+>(
+    order_network: &mut Box<dyn OrderNetworkTrait<OI, OO, N>>,
+    head_network: &mut HeadNetwork<OO, HO, N>,
+    test_data: (Box<[usize; N]>, Box<[[f64; OI]; N]>),
+) -> f64 {
+    let (labels, inputs) = test_data;
+    let outputs = order_network.forward_batch_no_grad(inputs);
+    let outputs = head_network.forward_batch_no_grad(outputs);
+    let correct = labels
+        .into_iter()
+        .enumerate()
+        .map(|(i, correct_label_index)| {
+            let guess = outputs[i]
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .unwrap();
+            guess.0 == correct_label_index
+        })
+        .filter(|v| *v)
+        .count();
+    (correct as f64) / N as f64
+}
 
 impl<
         const ON: usize,
@@ -314,7 +246,7 @@ impl<
 {
     pub fn train_chaos_head(&mut self) {
         let mut stdin = termion::async_stdin();
-        let mut current_chaos_network: ChaosNetwork<OI, CO, N> = ChaosNetwork::new(CI, CO);
+        let mut current_chaos_network: ChaosNetwork<OI, CO, N> = ChaosNetwork::new();
         let mut current_head_network: HeadNetwork<CO, O, N> = HeadNetwork::default();
 
         // Do the actual training
@@ -441,37 +373,63 @@ impl<
         }
     }
 
-    // pub fn fine_tune(&mut self) {
-    //     let mut stdin = termion::async_stdin();
-    //     let mut current_order_network: OrderNetworkTrait<OI, OO, N> = self.order_network.unwrap();
-    //     let mut current_head_network: HeadNetwork<OO, O, N> = HeadNetwork::default();
-    //
-    //     // Do the actual training
-    //     for training_step in 0..self.max_training_steps {
-    //         // Prep the data
-    //         let batch_train_data: Vec<(Box<[usize; N]>, Box<[Tensor1D<N>; OI]>)> = (0..self
-    //             .steps_per_training_step)
-    //             .map(|_i| {
-    //                 let (train_labels, train_examples) = self.train_data.next();
-    //                 (train_labels, train_examples)
-    //             })
-    //             .collect();
-    //         let batch_test_data: Vec<(Box<[usize; N]>, Box<[Tensor1D<N>; OI]>)> = (0..self
-    //             .validation_steps)
-    //             .map(|_i| {
-    //                 let (train_labels, train_examples) = self.test_data.next();
-    //                 (train_labels, train_examples)
-    //             })
-    //             .collect();
-    //
-    //         batch_train_data.iter().for_each(|batch| {
-    //             train_next_batch(
-    //                 &mut current_order_network,
-    //                 &mut current_chaos_network,
-    //                 &mut current_head_network,
-    //                 batch,
-    //             )
-    //         });
-    //     }
-    // }
+    pub fn fine_tune(&mut self) {
+        // let mut stdin = termion::async_stdin();
+        let mut current_order_network: Box<dyn OrderNetworkTrait<OI, OO, N>> =
+            self.order_network.take().unwrap();
+        let mut current_head_network: HeadNetwork<OO, O, N> = HeadNetwork::default();
+        let s = include_str!("../../networks/1680549994/head-network.json");
+        let weights: Vec<Vec<f64>> = serde_json::from_str(s).unwrap();
+        current_head_network.weights = weights
+            .into_iter()
+            .map(|d| {
+                let x: [f64; O] = d.try_into().unwrap();
+                x
+            })
+            .collect::<Vec<[f64; O]>>()
+            .try_into()
+            .unwrap();
+
+        // Do the actual training
+        for training_step in 0..self.max_training_steps {
+            // Prep the data
+            let batch_train_data: Vec<(Box<[usize; N]>, Box<[[f64; OI]; N]>)> = (0..self
+                .steps_per_training_step)
+                .map(|_i| {
+                    let (train_labels, train_examples) = self.train_data.next();
+                    (train_labels, train_examples)
+                })
+                .collect();
+            let batch_test_data: Vec<(Box<[usize; N]>, Box<[[f64; OI]; N]>)> = (0..self
+                .validation_steps)
+                .map(|_i| {
+                    let (train_labels, train_examples) = self.test_data.next();
+                    (train_labels, train_examples)
+                })
+                .collect();
+
+            batch_train_data.into_iter().for_each(|batch| {
+                train_order_head_next_batch(
+                    &mut current_order_network,
+                    &mut current_head_network,
+                    batch,
+                )
+            });
+
+            // if training_step % 10 == 0 {
+            let average_validation_accuracy: f64 = batch_test_data
+                .into_iter()
+                .map(|step| {
+                    validate_order_head_next_batch(
+                        &mut current_order_network,
+                        &mut current_head_network,
+                        step,
+                    )
+                })
+                .sum::<f64>()
+                / (self.validation_steps as f64);
+            println!("AVA: {:?}", average_validation_accuracy);
+            // }
+        }
+    }
 }

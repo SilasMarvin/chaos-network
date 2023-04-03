@@ -98,7 +98,7 @@ def test_forward_batch_2():
     print("W12: Grad: ", w12.grad)
     print("W13: Grad: ", w13.grad)
     print("W14: Grad: ", w14.grad)
-# test_forward_batch_2()
+test_forward_batch_2()
 
 def test_forward_batch_3():
     w1 = torch.tensor(0.1, dtype=torch.float64, requires_grad=True)
@@ -152,4 +152,4 @@ def test_forward_batch_3():
     print("W17: Grad: ", w17.grad)
     print("W18: Grad: ", w18.grad)
     print("W19: Grad: ", w19.grad)
-test_forward_batch_3()
+# test_forward_batch_3()

@@ -6,15 +6,8 @@ use std::fs::File;
 use std::io::Write;
 
 pub struct HeadNetwork<const I: usize, const O: usize, const N: usize> {
-    weights: [[f64; O]; I],
+    pub weights: [[f64; O]; I],
     backwards: Option<
-        Box<
-            dyn FnOnce(&[[f64; N]; O], &[[f64; O]; I]) -> (Box<[[f64; O]; I]>, Box<[[f64; N]; I]>)
-                + Send
-                + Sync,
-        >,
-    >,
-    test_backwards: Option<
         Box<
             dyn FnOnce(&[[f64; O]; N], &[[f64; O]; I]) -> (Box<[[f64; O]; I]>, Box<[[f64; I]; N]>)
                 + Send
@@ -28,7 +21,6 @@ impl<const I: usize, const O: usize, const N: usize> Clone for HeadNetwork<I, O,
         Self {
             weights: self.weights.clone(),
             backwards: None,
-            test_backwards: None,
         }
     }
 }
@@ -46,74 +38,11 @@ impl<const I: usize, const O: usize, const N: usize> Default for HeadNetwork<I, 
         Self {
             weights,
             backwards: None,
-            test_backwards: None,
         }
     }
 }
 
 impl<const I: usize, const O: usize, const N: usize> HeadNetwork<I, O, N> {
-    // NOTE: The grads can be done more efficiently for sure
-    // Some explenation on what is happening here:
-    // -- This represents a fully connected layer
-    // -- The iniitial for loop is pretty simple except for our partial accumulation of the weight
-    // grads. We can only partiall acumulate the weight grads, no the input grads, because the
-    // input grads have to  be joined on a + and + with * is not associative where as the
-    // weight_grads are only *
-    // If this is confusing, which I am sure it is, try drawing out the test example below, and it
-    // will be a lot more clear. I am sure there are better ways to do this, and unfortunately I
-    // will probably have to revist this
-    pub fn forward_batch_from_chaos(
-        &mut self,
-        input: Box<[Tensor1D<N, WithTape>; I]>,
-    ) -> Box<[[f64; N]; O]> {
-        let mut ret = Box::new([[0.; N]; O]);
-
-        // This is so dumb, see: https://users.rust-lang.org/t/why-does-putting-an-array-in-a-box-cause-stack-overflow/36493/20
-        let mut partial_weight_grads = vec![[[1.; N]; O]; I].into_boxed_slice();
-        for i in 0..O {
-            for ii in 0..I {
-                for iii in 0..N {
-                    ret[i][iii] += self.weights[ii][i] * input[ii].data[iii];
-                    partial_weight_grads[ii][i][iii] = input[ii].data[iii];
-                }
-            }
-        }
-
-        self.backwards = Some(Box::new(move |grads, weights| {
-            let mut weight_grads = [[0.; O]; I];
-            let mut input_grads = [[0.; N]; I];
-            for i in 0..I {
-                for ii in 0..O {
-                    // Get final weight grads
-                    let g = element_wise_mul(&partial_weight_grads[i][ii], &grads[ii]);
-                    let g: f64 = g.iter().sum();
-                    weight_grads[i][ii] = g / (N as f64);
-                    for iii in 0..N {
-                        input_grads[i][iii] += weights[i][ii] * grads[ii][iii];
-                    }
-                }
-            }
-            (Box::new(weight_grads), Box::new(input_grads))
-        }));
-
-        ret
-    }
-
-    pub fn forward_batch_no_grad_from_chaos(
-        &self,
-        input: Box<[Tensor1D<N>; I]>,
-    ) -> Box<[[f64; N]; O]> {
-        let mut ret = Box::new([[0.; N]; O]);
-        for i in 0..O {
-            for ii in 0..I {
-                for iii in 0..N {
-                    ret[i][iii] += self.weights[ii][i] * input[ii].data[iii];
-                }
-            }
-        }
-        ret
-    }
-
     pub fn forward_batch(&mut self, input: Box<[[f64; I]; N]>) -> Box<[[f64; O]; N]> {
         let mut ret = Box::new([[0.; O]; N]);
         unsafe {
@@ -135,7 +64,7 @@ impl<const I: usize, const O: usize, const N: usize> HeadNetwork<I, O, N> {
             );
         }
 
-        self.test_backwards = Some(Box::new(move |grads, weights| {
+        self.backwards = Some(Box::new(move |grads, weights| {
             let mut weight_grads = [[0.; O]; I];
             let mut input_grads = [[0.; I]; N];
             for i in 0..N {
@@ -185,10 +114,7 @@ impl<const I: usize, const O: usize, const N: usize> HeadNetwork<I, O, N> {
         ret
     }
 
-    pub fn nll_test(
-        t: Box<[[f64; O]; N]>,
-        indices: &[usize; N],
-    ) -> (Box<[f64; N]>, Box<[[f64; O]; N]>) {
+    pub fn nll(t: Box<[[f64; O]; N]>, indices: &[usize; N]) -> (Box<[f64; N]>, Box<[[f64; O]; N]>) {
         let sum_e: [f64; N] = t.map(|o| o.iter().map(|d| d.exp()).sum());
         let mut tracker = 0;
         let log_softmax: [[f64; O]; N] = t.map(|o| {
@@ -219,60 +145,7 @@ impl<const I: usize, const O: usize, const N: usize> HeadNetwork<I, O, N> {
         (Box::new(loss), Box::new(grads))
     }
 
-    pub fn nll(t: Box<[[f64; N]; O]>, indexes: &[usize; N]) -> (Box<[f64; N]>, Box<[[f64; N]; O]>) {
-        let sum_e = t.iter().fold([0.; N], |mut acc, data| {
-            data.iter().enumerate().for_each(|(i, x)| acc[i] += x.exp());
-            acc
-        });
-        let log_softmax: Vec<[f64; N]> = t
-            .iter()
-            .map(|data| {
-                let mut tracker = 0;
-                data.map(|x| {
-                    let x = (x.exp() / sum_e[tracker]).ln();
-                    tracker += 1;
-                    x
-                })
-            })
-            .collect();
-        let losses: [f64; N] = indexes
-            .iter()
-            .enumerate()
-            .map(|(ii, i)| -1. * log_softmax[*i][ii])
-            .collect::<Vec<f64>>()
-            .try_into()
-            .unwrap();
-        let grads: [[f64; N]; O] = t
-            .into_iter()
-            .enumerate()
-            .map(|(i, data)| {
-                let mut tracker = 0;
-                data.map(|x| {
-                    let mut x = x.exp() / sum_e[tracker];
-                    if i == indexes[tracker] {
-                        x -= 1.;
-                    }
-                    tracker += 1;
-                    x
-                })
-            })
-            .collect::<Vec<[f64; N]>>()
-            .try_into()
-            .unwrap();
-        (Box::new(losses), Box::new(grads))
-    }
-
-    pub fn backwards_test(
-        &mut self,
-        grads: &[[f64; O]; N],
-    ) -> (Box<[[f64; O]; I]>, Box<[[f64; I]; N]>) {
-        match self.test_backwards.take() {
-            Some(func) => func(grads, &self.weights),
-            None => panic!("Calling backwards on a HeadNetwork when it has no grads"),
-        }
-    }
-
-    pub fn backwards(&mut self, grads: &[[f64; N]; O]) -> (Box<[[f64; O]; I]>, Box<[[f64; N]; I]>) {
+    pub fn backwards(&mut self, grads: &[[f64; O]; N]) -> (Box<[[f64; O]; I]>, Box<[[f64; I]; N]>) {
         match self.backwards.take() {
             Some(func) => func(grads, &self.weights),
             None => panic!("Calling backwards on a HeadNetwork when it has no grads"),
@@ -308,53 +181,11 @@ mod tests {
     use super::*;
 
     #[test]
-    // NOTE compare output to results of test_forward_batch in python-tests tests/head_network.py
-    fn test_forward_batch_from_chaos() {
-        let mut network: HeadNetwork<2, 2, 2> = HeadNetwork {
-            weights: [[0.1, 0.2], [0.3, 0.4]],
-            backwards: None,
-            test_backwards: None,
-        };
-        let input: Box<[Tensor1D<2, WithTape>; 2]> =
-            Box::new([Tensor1D::new([0.1, 0.3]), Tensor1D::new([0.2, 0.4])]);
-        let indices = [0, 1];
-        let outputs = network.forward_batch_from_chaos(input);
-        assert_eq!(
-            *outputs,
-            [[0.07, 0.15], [0.10000000000000002, 0.22000000000000003]]
-        );
-        let (loss, nll_grads) = HeadNetwork::<2, 2, 2>::nll(outputs, &indices);
-        assert_eq!(*loss, [0.7082596763414484, 0.658759555548697]);
-        assert_eq!(
-            *nll_grads,
-            [
-                [-0.5074994375506203, 0.48250714233361025],
-                [0.5074994375506204, -0.48250714233361025]
-            ]
-        );
-        let (weight_grads, input_grads) = network.backwards.unwrap()(&nll_grads, &network.weights);
-        assert_eq!(
-            *weight_grads,
-            [
-                [0.04700109947251052, -0.047001099472510514],
-                [0.04575148471166002, -0.045751484711660004]
-            ]
-        );
-        assert_eq!(
-            *input_grads,
-            [
-                [0.05074994375506206, -0.048250714233361025],
-                [0.05074994375506209, -0.048250714233361025]
-            ]
-        );
-    }
-
     #[test]
     fn test_head_network_forward_batch() {
         let mut network: HeadNetwork<2, 2, 2> = HeadNetwork {
             weights: [[0.1, 0.2], [0.3, 0.4]],
             backwards: None,
-            test_backwards: None,
         };
         let input = Box::new([[0.1, 0.2], [0.3, 0.4]]);
         let outputs = network.forward_batch(input);
@@ -363,7 +194,7 @@ mod tests {
             [[0.07, 0.10000000000000002], [0.15, 0.22000000000000003]]
         );
         let indices = [0, 1];
-        let (loss, nll_grads) = HeadNetwork::<2, 2, 2>::nll_test(outputs, &indices);
+        let (loss, nll_grads) = HeadNetwork::<2, 2, 2>::nll(outputs, &indices);
         assert_eq!(*loss, [0.7082596763414484, 0.658759555548697]);
         assert_eq!(
             *nll_grads,
@@ -372,7 +203,7 @@ mod tests {
                 [0.48250714233361025, -0.48250714233361025]
             ]
         );
-        let (weight_grads, input_grads) = network.backwards_test(&nll_grads);
+        let (weight_grads, input_grads) = network.backwards(&nll_grads);
         assert_eq!(
             *weight_grads,
             [

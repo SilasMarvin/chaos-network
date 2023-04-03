@@ -312,8 +312,8 @@ pub fn build_backwards(input_token_stream: TokenStream) -> TokenStream {
             ret.insert(
                 0,
                 quote! {
-                    // let #dx_varname = do_mish_backward(#pre_mish_varname) * (#(#dx_varbuilder)+*);
-                    let #dx_varname = 5.;
+                    let #dx_varname = do_mish_backward(#pre_mish_varname) * (#(#dx_varbuilder)+*);
+                    // let #dx_varname = 5.;
                     #weight_grads_ident[#bias_index] = #dx_varname; // The bias
                     #(#adds)*
                 },

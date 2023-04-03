@@ -4,6 +4,7 @@ pub trait OrderNetworkTrait<const I: usize, const O: usize, const N: usize>:
     fn forward_batch(&mut self, input: Box<[[f64; I]; N]>) -> Box<[[f64; O]; N]>;
     fn forward_batch_no_grad(&self, input: Box<[[f64; I]; N]>) -> Box<[[f64; O]; N]>;
     fn backwards(&mut self, grads: &[[f64; O]; N]) -> Vec<Vec<f64>>;
+    fn apply_gradients(&mut self, grads: Vec<Vec<f64>>);
 }
 
 pub trait OrderNetworkTraitClone<const I: usize, const O: usize, const N: usize> {
@@ -104,6 +105,12 @@ macro_rules! build_order_network {
                     None => panic!("Calling backwards on OrderNetwork when it has no grads"),
                 }
             }
+
+            fn apply_gradients(&mut self, grads: Vec<Vec<f64>>) {
+                self.weights.iter_mut().zip(grads.into_iter()).for_each(|(w, g)| {
+                    *w -= 0.01 * (g.iter().sum::<f64>() / ($n as f64));
+                });
+            }
         }
     };
 }
@@ -122,7 +129,7 @@ mod tests {
             ["Leaf", [], [0.5]],
             ["Leaf", [], [0.6]]
         ]);
-        let mut file = File::create("networks/0/1.json").unwrap();
+        let mut file = File::create("networks/0/chaos-network.json").unwrap();
         write!(file, "{}", network_json).unwrap();
     }
 
@@ -170,7 +177,7 @@ mod tests {
             ["Leaf", [], [0.4]],
             ["Leaf", [], [0.5]]
         ]);
-        let mut file = File::create("networks/1/1.json").unwrap();
+        let mut file = File::create("networks/1/chaos-network.json").unwrap();
         write!(file, "{}", network_json).unwrap();
     }
 
@@ -216,7 +223,7 @@ mod tests {
             ["Leaf", [], [0.9]],
             ["Leaf", [], [0.1]]
         ]);
-        let mut file = File::create("networks/2/1.json").unwrap();
+        let mut file = File::create("networks/2/chaos-network.json").unwrap();
         write!(file, "{}", network_json).unwrap();
     }
 
