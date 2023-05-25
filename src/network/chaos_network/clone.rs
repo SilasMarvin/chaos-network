@@ -8,6 +8,7 @@ impl<const I: usize, const O: usize, const N: usize> Clone for ChaosNetwork<I, O
             nodes: self.nodes.clone(),
             tape: self.tape.clone(),
             input_connectivity_chance: self.input_connectivity_chance,
+            last_batch_input_ids: None,
         }
     }
 }

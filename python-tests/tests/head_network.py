@@ -69,9 +69,9 @@ def test_forward_batch():
 
     outputs = torch.matmul(inputs, weights)
     print("Outputs: ", outputs)
-    loss = nll(log_softmax(outputs), targets)
-    print("Loss: ", loss)
-    loss.backward()
+    # loss = nll(log_softmax(outputs), targets)
+    # print("Loss: ", loss)
+    outputs.backward(torch.ones_like(weights))
     print("Weight Grads: ", weights.grad)
     print("Input Grads: ", inputs.grad)
 test_forward_batch()

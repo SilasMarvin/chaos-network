@@ -112,7 +112,7 @@ impl<const N: usize> Tensor1DAdd<N, WithoutTape, WithoutTape> for Tensor1D<N, Wi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gradients::Tape;
+    use crate::network::chaos_network::gradients::Tape;
 
     #[test]
     fn test_add_1d_dual_grad() {

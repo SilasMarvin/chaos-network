@@ -44,7 +44,7 @@ impl<const N: usize> Tensor1DMish<N, WithoutTape> for Tensor1D<N, WithoutTape> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gradients::Tape;
+    use crate::network::chaos_network::gradients::Tape;
 
     #[test]
     fn test_mish_1d() {

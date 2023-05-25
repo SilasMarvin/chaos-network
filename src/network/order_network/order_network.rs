@@ -1,3 +1,6 @@
+use crate::network::chaos_network::chaos_network::Node;
+use crate::network::optimizers::AdamOptimizer;
+
 pub trait OrderNetworkTrait<const I: usize, const O: usize, const N: usize>:
     OrderNetworkTraitClone<I, O, N> + Send + Sync
 {
@@ -5,6 +8,7 @@ pub trait OrderNetworkTrait<const I: usize, const O: usize, const N: usize>:
     fn forward_batch_no_grad(&self, input: Box<[[f64; I]; N]>) -> Box<[[f64; O]; N]>;
     fn backwards(&mut self, grads: &[[f64; O]; N]) -> Vec<Vec<f64>>;
     fn apply_gradients(&mut self, grads: Vec<Vec<f64>>);
+    fn merge_chaos_write_to_dir(&self, path: &str, chaos_network_nodes: Vec<Node<N>>);
 }
 
 pub trait OrderNetworkTraitClone<const I: usize, const O: usize, const N: usize> {
@@ -29,18 +33,26 @@ impl<const I: usize, const O: usize, const N: usize> Clone for Box<dyn OrderNetw
     }
 }
 
-pub struct OrderNetwork<const D: usize, const I: usize, const O: usize, const N: usize> {
+pub struct OrderNetwork<
+    const D: usize,
+    const W: usize,
+    const I: usize,
+    const O: usize,
+    const N: usize,
+> {
     pub weights: Vec<f64>,
     pub backwards: Option<Vec<Box<dyn FnOnce(&Vec<f64>, &[f64; O]) -> Vec<f64> + Send + Sync>>>,
+    pub optimizer: AdamOptimizer<1, W>,
 }
 
-impl<const D: usize, const I: usize, const O: usize, const N: usize> Clone
-    for OrderNetwork<D, I, O, N>
+impl<const D: usize, const W: usize, const I: usize, const O: usize, const N: usize> Clone
+    for OrderNetwork<D, W, I, O, N>
 {
     fn clone(&self) -> Self {
         Self {
             weights: self.weights.clone(),
             backwards: None,
+            optimizer: self.optimizer.clone(),
         }
     }
 }
@@ -48,49 +60,65 @@ impl<const D: usize, const I: usize, const O: usize, const N: usize> Clone
 #[macro_export]
 macro_rules! build_order_network {
     ($f:literal, $i:literal, $o:literal, $n:literal) => {
-        use crate::network::order_network::{OrderNetwork, OrderNetworkTrait};
-        use chaos_network_derive::{build_backwards, build_forward, build_weights};
+        use std::fs::read_to_string;
+        use std::fs::File;
+        use std::io::Write;
 
-        impl Default for OrderNetwork<$f, $i, $o, $n> {
+        use crate::network::order_network::{OrderNetwork, OrderNetworkTrait};
+        use crate::network::optimizers::AdamOptimizer;
+        use crate::network::chaos_network::chaos_network::{Node, NodeKind};
+        use chaos_network_derive::{build_backwards, build_forward, build_weights, get_weights_count};
+
+        const WEIGHTS_COUNT: usize = get_weights_count!($f);
+
+        impl Default for OrderNetwork<$f, WEIGHTS_COUNT, $i, $o, $n> {
             fn default() -> Self {
                 Self {
                     weights: build_weights!($f),
                     backwards: None,
+                    optimizer: AdamOptimizer::default()
                 }
             }
         }
 
-        impl OrderNetworkTrait<$i, $o, $n> for OrderNetwork<$f, $i, $o, $n> {
+        impl OrderNetworkTrait<$i, $o, $n> for OrderNetwork<$f, WEIGHTS_COUNT, $i, $o, $n> {
             fn forward_batch_no_grad(&self, input: Box<[[f64; $i]; $n]>) -> Box<[[f64; $o]; $n]> {
-                let output = input.map(|data| {
+                let output: Vec<[f64; $o]> = input.iter().map(|data| {
+                    // let mut ret = Vec::new();
+                    // ret.resize($o, 0.);
                     let mut ret = [0.; $o];
                     let weights = &self.weights;
                     build_forward!($f, weights, data, ret);
                     ret
-                });
-                Box::new(output)
+                 }).collect();
+                // unsafe {
+                //     let output: Box<[[f64; $o]; $n]> = Box::from_raw(Box::into_raw(output.into_boxed_slice()) as * mut [[f64; $o]; $n]);
+                //     output
+                // }
+                Box::new(output.try_into().unwrap())
             }
 
             fn forward_batch(&mut self, input: Box<[[f64; $i]; $n]>) -> Box<[[f64; $o]; $n]> {
-                let mut output = [[0.; $o]; $n];
+                let mut output: Vec<[f64; $o]> = Vec::new();
                 let mut partial_weight_funcs: Vec<
                     Box<dyn FnOnce(&Vec<f64>, &[f64; $o]) -> Vec<f64> + Send + Sync>,
                 > = Vec::new();
-                input.into_iter().enumerate().for_each(|(i, data)| {
+                input.iter().enumerate().for_each(|(i, data)| {
                     let mut ret = [0.; $o];
                     let weights = &self.weights;
                     build_forward!($f, weights, data, ret);
-                    output[i] = ret;
+                    output.push(ret);
                     let weights_len = self.weights.len();
+                    let inputs = Box::new(data.to_owned());
                     partial_weight_funcs.push(Box::new(move |weights, output_grads| {
                         let mut weight_grads = Vec::new();
                         weight_grads.resize(weights_len, 0.);
-                        build_backwards!($f, weights, data, output_grads, weight_grads);
+                        build_backwards!($f, weights, inputs, output_grads, weight_grads);
                         weight_grads
                     }));
                 });
                 self.backwards = Some(partial_weight_funcs);
-                Box::new(output)
+                Box::new(output.try_into().unwrap())
             }
 
             fn backwards(&mut self, grads: &[[f64; $o]; $n]) -> Vec<Vec<f64>> {
@@ -106,10 +134,62 @@ macro_rules! build_order_network {
                 }
             }
 
-            fn apply_gradients(&mut self, grads: Vec<Vec<f64>>) {
-                self.weights.iter_mut().zip(grads.into_iter()).for_each(|(w, g)| {
-                    *w -= 0.01 * (g.iter().sum::<f64>() / ($n as f64));
+            fn apply_gradients(&mut self, batch_grads: Vec<Vec<f64>>) {
+                let mut grads = [[0.; WEIGHTS_COUNT]; 1];
+                for i in 0..$n {
+                    for ii in 0..WEIGHTS_COUNT {
+                        grads[0][ii] += batch_grads[i][ii] / ($n as f64);
+                    }
+                }
+                let grads = self.optimizer.update(&grads);
+                self.weights.iter_mut().zip(grads[0].into_iter()).for_each(|(w, g)| {
+                    *w -= g;
                 });
+            }
+
+            fn merge_chaos_write_to_dir(&self, path: &str, mut chaos_network_nodes: Vec<Node<$n>>) {
+                let network_json = match read_to_string(format!("networks/{}/chaos-network.json", $f)) {
+                    Ok(val) => val,
+                    Err(_e) => {
+                        panic!("Error merging and writing chaos network to dir")
+                    }
+                };
+                let mut order_network_nodes: Vec<(NodeKind, Vec<usize>, Vec<f64>)> = match serde_json::from_str(&network_json) {
+                    Ok(val) => val,
+                    Err(_e) => panic!("Error merging and writing chaos network to dir")
+                };
+                // NOTE When merging we are removing the input nodes for the chaos network, and
+                // changing the leaves of the order network to normal nodes with the connections
+                // the chaos network input nodes had. This is why the input nodes do not have
+                // biases in the chaos network
+                // We also need to account for offset in the edges of the chaos network
+                let edge_offset = order_network_nodes.len();
+                let mut weights_taken = 0;
+                order_network_nodes.iter_mut().for_each(|(_, _, w)| {
+                    *w = self.weights[weights_taken..weights_taken + w.len()].to_owned();
+                    weights_taken += w.len();
+                });
+                order_network_nodes.iter_mut().skip_while(|n| n.0 != NodeKind::Leaf).zip(chaos_network_nodes.iter()).for_each(|(on, cn)| {
+                    on.0 = NodeKind::Normal;
+                    on.1 = cn.edges.iter().map(|e| e + edge_offset - $o).collect::<Vec<usize>>();
+                    on.2.append(&mut cn.weights.iter().map(|t| t.data).collect::<Vec<f64>>());
+                });
+                let mut chaos_network_nodes_to_keep: Vec<Node<$n>> = chaos_network_nodes.into_iter().skip_while(|n| n.kind == NodeKind::Input).collect();
+                chaos_network_nodes_to_keep.iter_mut().for_each(|n| n.edges.iter_mut().for_each(|e| *e += edge_offset - $o));
+                let mut chaos_network_nodes_to_keep: Vec<(NodeKind, Vec<usize>, Vec<f64>)> = chaos_network_nodes_to_keep.into_iter().map(|n|
+                    (n.kind,
+                    n.edges.clone(),
+                    n.weights.iter().map(|w| w.data).collect::<Vec<f64>>())
+                ).collect();
+                order_network_nodes.append(&mut chaos_network_nodes_to_keep);
+                // TODO tmr start by filtering out the unconnected normal nodes after the above
+                // actions
+                let write_out = serde_json::to_string(&order_network_nodes).unwrap();
+                // Write it all out
+                let path: String = format!("{}/chaos-network.json", path);
+                let mut file = File::create(path).unwrap();
+                write!(file, "{}", write_out).unwrap();
+
             }
         }
     };
@@ -137,7 +217,8 @@ mod tests {
     // NOTE compare output to results of test_forward_batch_1 in python-tests tests/order_network.py
     fn forward_batch_test_1() {
         build_order_network!(0, 2, 2, 2);
-        let mut network: OrderNetwork<0, 2, 2, 2> = OrderNetwork::default();
+        const WEIGHTS_COUNT1: usize = get_weights_count!(0);
+        let mut network: OrderNetwork<0, WEIGHTS_COUNT1, 2, 2, 2> = OrderNetwork::default();
         let input = Box::new([[0.1, 0.2], [0.2, 0.3]]);
         let output = network.forward_batch(input);
         assert_eq!(output[0], [0.4384104584592529, 0.5611483776438518]); // The rounding is messed up but this works
@@ -185,7 +266,8 @@ mod tests {
     // NOTE compare output to results of test_forward_batch_2 in python-tests tests/order_network.py
     fn forward_batch_test_2() {
         build_order_network!(1, 2, 2, 1);
-        let mut network: OrderNetwork<1, 2, 2, 1> = OrderNetwork::default();
+        const WEIGHTS_COUNT2: usize = get_weights_count!(1);
+        let mut network: OrderNetwork<1, WEIGHTS_COUNT2, 2, 2, 1> = OrderNetwork::default();
         let input = Box::new([[0.1, 0.2]]);
         let output = network.forward_batch(input);
         assert_eq!(output[0], [0.8433231723714711, 1.130676581160498]); // The rounding is messed up but this works
@@ -231,7 +313,8 @@ mod tests {
     // NOTE compare output to results of test_forward_batch_3 in python-tests tests/order_network.py
     fn forward_batch_test_3() {
         build_order_network!(2, 2, 2, 1);
-        let mut network: OrderNetwork<2, 2, 2, 1> = OrderNetwork::default();
+        const WEIGHTS_COUNT3: usize = get_weights_count!(2);
+        let mut network: OrderNetwork<2, WEIGHTS_COUNT3, 2, 2, 1> = OrderNetwork::default();
         let input = Box::new([[0.1, 0.2]]);
         let output = network.forward_batch(input);
         assert_eq!(output[0], [1.9038374515943743, 1.2983920430328038]); // The rounding is messed up but this works

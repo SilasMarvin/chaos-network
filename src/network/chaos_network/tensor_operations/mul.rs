@@ -112,12 +112,34 @@ impl<const N: usize> Tensor0DMul<N, WithTape, WithTape> for Tensor0D<N, WithTape
         new
     }
 
+    // TODO: Make everything mul by reference
     fn mul_left_by_reference(
         &mut self,
-        _other: &Tensor1D<N, WithTape>,
-        _tape: &mut Tape<N>,
+        other: &Tensor1D<N, WithTape>,
+        tape: &mut Tape<N>,
     ) -> Tensor1D<N, WithTape> {
-        todo!();
+        let new_data: [f64; N] = other.data.map(|d| self.data * d);
+        let mut new = Tensor1D::new(new_data);
+        new.set_id_grad_for(tape.get_next_temporary_tensor_id());
+        // Add operation to tape
+        let new_id = new.grad_for;
+        let self_id = self.grad_for;
+        let other_id = other.grad_for;
+        let self_data = self.data;
+        let other_data = other.data;
+        tape.add_operation((
+            new_id,
+            Box::new(move |g| {
+                let mut tg1 = g.remove(new_id);
+                let mut tg2 = tg1.clone();
+                tg1.data = *element_wise_mul::<N>(&tg1.data, &other_data);
+                tg2.data = tg2.data.map(|x| x * self_data);
+                g.insert(self_id, tg1);
+                g.insert(other_id, tg2);
+            }),
+        ));
+
+        new
     }
 
     fn mul_explicit_no_grad(
@@ -162,7 +184,7 @@ impl<const N: usize> Tensor0DMul<N, WithoutTape, WithoutTape> for Tensor0D<N, Wi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gradients::Tape;
+    use crate::network::chaos_network::gradients::Tape;
 
     #[test]
     fn test_mul_1d() {

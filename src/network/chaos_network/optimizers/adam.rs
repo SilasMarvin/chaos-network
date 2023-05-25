@@ -10,28 +10,25 @@ pub struct AdamOptimizer {
     e: f64,
     m: f64,
     v: f64,
-    t: i32,
 }
 
 impl Default for AdamOptimizer {
     fn default() -> Self {
         Self {
-            a: 0.001,
+            a: 0.00025,
             b1: 0.9,
             b2: 0.999,
             b1t: 0.9,
             b2t: 0.999,
-            e: 1e-8,
+            e: 10e-8,
             m: 0.,
             v: 0.,
-            t: 0,
         }
     }
 }
 
 impl Optimizer for AdamOptimizer {
     fn update(&mut self, g: f64) -> f64 {
-        self.t += 1;
         self.m = self.b1 * self.m + (1. - self.b1) * g;
         self.v = self.b2 * self.v + (1. - self.b2) * (g * g);
         self.b1t = self.b1t * self.b1;

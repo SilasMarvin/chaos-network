@@ -1,7 +1,9 @@
 use rand::distributions::{Uniform, WeightedIndex};
 use rand::prelude::*;
 use rand::Rng;
+use rand_distr::{Distribution, Normal};
 
+use serde::Deserialize;
 use serde::Serialize;
 
 use std::boxed::Box;
@@ -19,7 +21,7 @@ use crate::network::chaos_network::tensors::{Tensor0D, Tensor1D, WithTape, Witho
 
 pub static NODE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeKind {
     Input,
     Normal,
@@ -39,6 +41,7 @@ pub struct ChaosNetwork<const I: usize, const O: usize, const N: usize> {
     pub nodes: Vec<Node<N>>,
     pub tape: Tape<N>,
     pub input_connectivity_chance: f64,
+    pub last_batch_input_ids: Option<[usize; I]>,
 }
 
 #[derive(Clone)]
@@ -54,8 +57,8 @@ pub struct Node<const N: usize> {
 impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
     pub fn new() -> Self {
         let mut network: ChaosNetwork<I, O, N> = ChaosNetwork::default();
-        network.add_nodes(NodeKind::Input, I);
         network.add_nodes(NodeKind::Leaf, O);
+        network.add_nodes(NodeKind::Input, I);
         network
     }
 
@@ -77,21 +80,29 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
                 }
             }
             NodeKind::Input => {
-                if self.nodes.len() > 0 {
-                    panic!("Adding the input nodes should be the first step")
+                if self.leaves_count == 0 {
+                    panic!("Should add the inputs after adding the leafe nodes")
                 }
                 for _i in 0..count {
                     self.insert_node(NodeKind::Input, 0);
+                    if let Some(node_index_to) = self
+                        .nodes
+                        .iter()
+                        .position(|n| n.kind == NodeKind::Leaf && n.edges_to_count == 0)
+                    {
+                        self.add_edge(0, node_index_to);
+                    } else {
+                        self.add_random_edge(0);
+                    }
                     self.inputs_count += 1;
                 }
             }
             NodeKind::Leaf => {
-                if self.inputs_count == 0 {
-                    panic!("Adding leaves should be done after adding input nodes")
+                if self.inputs_count != 0 {
+                    panic!("Adding leaves should be done before adding input nodes")
                 }
                 for _i in 0..count {
                     self.insert_node(NodeKind::Leaf, self.nodes.len());
-                    self.add_random_edge_to(self.nodes.len() - 1);
                     self.leaves_count += 1;
                 }
             }
@@ -200,9 +211,28 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         self.nodes.iter().fold(0, |acc, n| acc + n.edges.len())
     }
 
+    pub fn forward_batch_with_input_grads(
+        &mut self,
+        mut input: Box<[Tensor1D<N, WithTape>; I]>,
+    ) -> (Box<[[f64; O]; N]>, Box<[usize; O]>) {
+        self.last_batch_input_ids = Some(
+            input
+                .iter_mut()
+                .map(|t| {
+                    let id = self.tape.get_next_temporary_tensor_id();
+                    t.set_id_grad_for(id);
+                    id
+                })
+                .collect::<Vec<usize>>()
+                .try_into()
+                .unwrap(),
+        );
+        self.forward_batch(&input)
+    }
+
     pub fn forward_batch(
         &mut self,
-        input: &[Tensor1D<N>; I],
+        input: &[Tensor1D<N, WithTape>; I],
     ) -> (Box<[[f64; O]; N]>, Box<[usize; O]>) {
         let mut output = [[0.; O]; N];
         let mut output_ids = [0; O];
@@ -318,10 +348,27 @@ impl<const I: usize, const O: usize, const N: usize> ChaosNetwork<I, O, N> {
         Box::new(output)
     }
 
-    pub fn execute_and_apply_gradients(&mut self) {
+    pub fn execute_and_apply_gradients(&mut self) -> Option<Box<[[f64; I]; N]>> {
         let mut grads = self.tape.execute();
         for n in self.nodes.iter_mut() {
             n.apply_gradients(&mut grads);
+        }
+        match self.last_batch_input_ids {
+            Some(input_ids) => {
+                // If we don't make these vecs this will overflow the stack
+                let mut output_grads = vec![[0.; I]; N];
+                let temp: Vec<[f64; N]> = input_ids
+                    .into_iter()
+                    .map(|id| grads.remove(id).data)
+                    .collect();
+                for i in 0..N {
+                    for ii in 0..I {
+                        output_grads[i][ii] = temp[ii][i];
+                    }
+                }
+                Some(Box::new(output_grads.try_into().unwrap()))
+            }
+            None => None,
         }
     }
 
@@ -400,7 +447,8 @@ impl<const N: usize> Node<N> {
 
     fn add_weight(&mut self, tape: &mut Tape<N>) {
         let mut rng = rand::thread_rng();
-        let w = (rng.gen::<f64>() - 0.5) / 100.;
+        let distribution = Normal::new(0., 0.2).unwrap();
+        let w = distribution.sample(&mut rng);
         let mut v: Tensor0D<N, WithTape> = Tensor0D::new(w);
         v.set_id_grad_for(tape.get_next_network_tensor_id());
         self.weights.push(v);
@@ -433,8 +481,10 @@ impl<const N: usize> Node<N> {
             let w_gradients = gradients.remove_or_0(w.id);
             let averaged_gradients: f64 = w_gradients.data.iter().sum::<f64>() / (N as f64);
             if averaged_gradients != 0. {
-                // w.data -= 0.01 * averaged_gradients;
-                w.data -= self.optimizer.update(averaged_gradients);
+                w.data -= 0.1 * averaged_gradients;
+                // THIS IS WRONG FYI
+                // let g = self.optimizer.update(averaged_gradients);
+                // w.data -= g;
             }
         }
     }

@@ -1,4 +1,6 @@
 use crate::network::chaos_network::tensors::helpers::element_wise_mul;
+use crate::network::optimizers::AdamOptimizer;
+use rand_distr::{Distribution, Normal};
 
 use matrixmultiply::dgemm;
 use rand::Rng;
@@ -14,6 +16,7 @@ pub struct HeadNetwork<const I: usize, const O: usize, const N: usize> {
                 + Sync,
         >,
     >,
+    optimizer: AdamOptimizer<I, O>,
 }
 
 impl<const I: usize, const O: usize, const N: usize> Clone for HeadNetwork<I, O, N> {
@@ -21,6 +24,7 @@ impl<const I: usize, const O: usize, const N: usize> Clone for HeadNetwork<I, O,
         Self {
             weights: self.weights.clone(),
             backwards: None,
+            optimizer: self.optimizer.clone(),
         }
     }
 }
@@ -28,16 +32,18 @@ impl<const I: usize, const O: usize, const N: usize> Clone for HeadNetwork<I, O,
 impl<const I: usize, const O: usize, const N: usize> Default for HeadNetwork<I, O, N> {
     fn default() -> Self {
         let mut rng = rand::thread_rng();
+        let distribution = Normal::new(0., 0.2).unwrap();
         let mut weights = [[0.; O]; I];
         for i in 0..I {
             for ii in 0..O {
-                let w = (rng.gen::<f64>() - 0.5) / 100.;
+                let w = distribution.sample(&mut rng);
                 weights[i][ii] = w;
             }
         }
         Self {
             weights,
             backwards: None,
+            optimizer: AdamOptimizer::default(),
         }
     }
 }
@@ -153,9 +159,10 @@ impl<const I: usize, const O: usize, const N: usize> HeadNetwork<I, O, N> {
     }
 
     pub fn apply_gradients(&mut self, grads: &[[f64; O]; I]) {
+        let adam_adjusted_grads = self.optimizer.update(grads);
         for i in 0..I {
             for ii in 0..O {
-                self.weights[i][ii] -= 0.1 * grads[i][ii];
+                self.weights[i][ii] -= adam_adjusted_grads[i][ii];
             }
         }
     }
@@ -181,11 +188,11 @@ mod tests {
     use super::*;
 
     #[test]
-    #[test]
     fn test_head_network_forward_batch() {
         let mut network: HeadNetwork<2, 2, 2> = HeadNetwork {
             weights: [[0.1, 0.2], [0.3, 0.4]],
             backwards: None,
+            optimizer: AdamOptimizer::default(),
         };
         let input = Box::new([[0.1, 0.2], [0.3, 0.4]]);
         let outputs = network.forward_batch(input);
